@@ -100,6 +100,8 @@
     </Reference>
     <Reference Include="MonAgentListener, Version=33.1.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35, processorArchitecture=MSIL" />
     <Reference Include="System.ComponentModel.Composition" />
+    <Reference Include="System.Data.DataSetExtensions" />
+    <Reference Include="System.DirectoryServices" />
     <Reference Include="System.IdentityModel" />
     <Reference Include="System.IO.Compression" />
     <Reference Include="System.Net" />
@@ -217,12 +219,14 @@
     <Compile Include="Authentication\PasswordResetResult.cs" />
     <Compile Include="Authentication\Providers\AuthenticationPolicy.cs" />
     <Compile Include="Authentication\Providers\AuthenticatorT.cs" />
+    <Compile Include="Authentication\Providers\LdapUser\LdapUserAuthenticatorConfiguration.cs" />
     <Compile Include="Authentication\Providers\IdentityInformation.cs" />
     <Compile Include="Authentication\Providers\AzureActiveDirectoryV2\AzureActiveDirectoryV2Authenticator.cs" />
     <Compile Include="Authentication\Providers\AzureActiveDirectoryV2\AzureActiveDirectoryV2AuthenticatorConfiguration.cs" />
     <Compile Include="Authentication\Providers\AzureActiveDirectory\AzureActiveDirectoryAuthenticator.cs" />
     <Compile Include="Authentication\Providers\AzureActiveDirectory\AzureActiveDirectoryAuthenticatorConfiguration.cs" />
     <Compile Include="Diagnostics\TraceDiagnosticsSourceScope.cs" />
+    <Compile Include="Authentication\Providers\LdapUser\LdapUserAuthenticator.cs" />
     <Compile Include="Extensions\ClaimsExtensions.cs" />
     <Compile Include="Configuration\IGalleryConfigurationService.cs" />
     <Compile Include="Configuration\IPackageDeleteConfiguration.cs" />
@@ -324,6 +328,7 @@
     <Compile Include="Infrastructure\Mail\Messages\ReportPackageMessageBase.cs" />
     <Compile Include="Infrastructure\Mail\Messages\SigninAssistanceMessage.cs" />
     <Compile Include="Infrastructure\Mail\Requests\ReportPackageRequest.cs" />
+    <Compile Include="Infrastructure\Authentication\LdapValidator.cs" />
     <Compile Include="Migrations\201711082145351_AddAccountDelete.cs" />
     <Compile Include="Migrations\201711082145351_AddAccountDelete.Designer.cs">
       <DependentUpon>201711082145351_AddAccountDelete.cs</DependentUpon>

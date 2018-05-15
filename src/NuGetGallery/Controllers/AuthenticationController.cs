@@ -14,6 +14,7 @@ using System.Web.Mvc;
 using NuGetGallery.Authentication;
 using NuGetGallery.Authentication.Providers;
 using NuGetGallery.Authentication.Providers.AzureActiveDirectoryV2;
+using NuGetGallery.Authentication.Providers.LdapUser;
 using NuGetGallery.Authentication.Providers.MicrosoftAccount;
 using NuGetGallery.Infrastructure.Authentication;
 using NuGetGallery.Infrastructure.Mail;
@@ -109,7 +110,10 @@ namespace NuGetGallery
                 return LoggedInRedirect(returnUrl);
             }
 
-            return RegisterView(new LogOnViewModel());
+            return RegisterView(new LogOnViewModel
+            {
+                UseLdap = _authService.Authenticators.TryGetValue(Authenticator.GetName(typeof(LdapUserAuthenticator)), out var ldapAuthenticator) && ldapAuthenticator.BaseConfig.Enabled
+            });
         }
 
         [HttpPost]
@@ -274,6 +278,18 @@ namespace NuGetGallery
                         result.Credential,
                         (result.Credential.IsExternal() && string.Equals(result.UserInfo?.Email, model.Register.EmailAddress))
                         );
+                }
+                else if (model.UseLdap)
+                {
+                    if (!LdapValidator.ValidateUser(model.Register.Username, model.Register.Password))
+                    {
+                        throw new EntityException(Strings.LdapUserInvalid, model.Register.Username);
+                    }
+
+                    user = await _authService.Register(
+                        model.Register.Username,
+                        model.Register.EmailAddress,
+                        _credentialBuilder.CreateLdapCredential(model.Register.Username));
                 }
                 else
                 {
