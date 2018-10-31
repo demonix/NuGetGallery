@@ -59,7 +59,9 @@ namespace NuGetGallery.Infrastructure.Authentication
                     return false;
 
                 // Check if is in allowed group:
-                if (validatedUser.Properties[BaseConfig.GroupAttribute].OfType<string>().All(group => string.Compare(group, BaseConfig.AllowedGroup, StringComparison.CurrentCultureIgnoreCase) != 0))
+
+                if (!String.IsNullOrWhiteSpace(BaseConfig.AllowedGroup) && validatedUser.Properties[BaseConfig.GroupAttribute].OfType<string>().All(group =>
+                    string.Compare(group, BaseConfig.AllowedGroup, StringComparison.CurrentCultureIgnoreCase) != 0))
                     return false;
 
                 return true;
