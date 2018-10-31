@@ -243,6 +243,15 @@ namespace NuGetGallery.Configuration
         string UserPasswordHint { get; set; }
 
         /// <summary>
+        /// The required format for a user email.
+        /// </summary>
+        string UserEmailRegex { get; set; }
+
+        /// <summary>
+        /// A message to show the user, to explain email requirements.
+        /// </summary>
+        string UserEmailHint { get; set; }
+        /// <summary>
         /// Defines the time after which V1 API keys expire.
         /// </summary>
         int ExpirationInDaysForApiKeyV1 { get; set; }

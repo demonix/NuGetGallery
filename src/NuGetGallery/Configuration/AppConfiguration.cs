@@ -240,6 +240,17 @@ namespace NuGetGallery.Configuration
         public string UserPasswordHint { get; set; }
 
         /// <summary>
+        /// A regex to validate password format. The default regex requires the password to be atlease 8 characters, 
+        /// include at least one uppercase letter, one lowercase letter and a digit.
+        /// </summary>
+        [Required]
+        [DefaultValue(@"^[-A-Za-z0-9!#$%&'*+\/=?^_`{|}~\.]+@[A-Za-z0-9]+[\w\.-]*[A-Za-z0-9]*\.[A-Za-z0-9][A-Za-z\.]*[A-Za-z]")]
+        public string UserEmailRegex { get; set; }
+
+        [Required]
+        [DefaultValue("This doesn't appear to be a valid email address.")]
+        public string UserEmailHint { get; set; }
+        /// <summary>
         /// Defines the time after which V1 API keys expire.
         /// </summary>
         public int ExpirationInDaysForApiKeyV1 { get; set; }

@@ -148,7 +148,7 @@ namespace NuGetGallery
             var accountToTransform = GetCurrentUser();
 
             var adminUsername = transformViewModel.AdminUsername;
-            if (Regex.IsMatch(adminUsername, Constants.EmailValidationRegex, RegexOptions.None, Constants.EmailValidationRegexTimeout))
+            if (Regex.IsMatch(adminUsername, _config.UserEmailRegex, RegexOptions.None, Constants.EmailValidationRegexTimeout))
             {
                 ModelState.AddModelError(string.Empty, Strings.TransformAccount_AdminNameIsEmail);
                 return View(transformViewModel);
