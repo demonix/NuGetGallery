@@ -3,6 +3,7 @@
 
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using NuGet.Services.Entities;
 using NuGetGallery.Areas.Admin.Models;
 
 namespace NuGetGallery.Areas.Admin
@@ -56,7 +57,7 @@ namespace NuGetGallery.Areas.Admin
 
         Task AddAdminAsync(string galleryUsername);
 
-        Task DeleteSupportRequestsAsync(string createdBy);
+        Task DeleteSupportRequestsAsync(User user);
 
         Task<bool> TryAddDeleteSupportRequestAsync(User user);
     }

@@ -8,9 +8,10 @@ using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Web;
 using System.Web.Mvc;
+using NuGet.Services.Entities;
+using NuGet.Services.Messaging.Email;
 using NuGetGallery.Configuration;
 using NuGetGallery.Filters;
-using NuGetGallery.Infrastructure.Mail;
 using NuGetGallery.Infrastructure.Mail.Messages;
 using NuGetGallery.Security;
 
@@ -110,7 +111,7 @@ namespace NuGetGallery
         [ValidateAntiForgeryToken]
         public async Task<JsonResult> AddPackageOwner(string id, string username, string message)
         {
-            if (Regex.IsMatch(username, Constants.EmailValidationRegex, RegexOptions.None, Constants.EmailValidationRegexTimeout))
+            if (Regex.IsMatch(username, GalleryConstants.EmailValidationRegex, RegexOptions.None, GalleryConstants.EmailValidationRegexTimeout))
             {
                 return Json(new { success = false, message = Strings.AddOwner_NameIsEmail }, JsonRequestBehavior.AllowGet);
             }
@@ -205,7 +206,7 @@ namespace NuGetGallery
                 {
                     if (model.Package.Owners.Count == 1 && model.User == model.Package.Owners.Single())
                     {
-                        throw new InvalidOperationException("You can't remove the only owner from a package.");
+                        return Json(new { success = false, message = "You can't remove the only owner from a package." }, JsonRequestBehavior.AllowGet);
                     }
 
                     await _packageOwnershipManagementService.RemovePackageOwnerAsync(model.Package, model.CurrentUser, model.User, commitAsTransaction: true);

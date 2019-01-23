@@ -4,9 +4,10 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using NuGet.Services.Entities;
+using NuGet.Services.Licenses;
 using NuGet.Services.Validation.Issues;
 using NuGet.Versioning;
-using NuGetGallery.Extensions;
 
 namespace NuGetGallery
 {
@@ -54,14 +55,15 @@ namespace NuGetGallery
 
             PushedBy = pushedBy;
 
-            LatestSymbolsPackage = package.LatestSymbolPackage();
-
             InitializeRepositoryMetadata(package.RepositoryUrl, package.RepositoryType);
 
             if (PackageHelper.TryPrepareUrlForRendering(package.ProjectUrl, out string projectUrl))
             {
                 ProjectUrl = projectUrl;
             }
+
+            EmbeddedLicenseType = package.EmbeddedLicenseType;
+            LicenseExpression = package.LicenseExpression;
 
             if (PackageHelper.TryPrepareUrlForRendering(package.LicenseUrl, out string licenseUrl))
             {
@@ -103,7 +105,7 @@ namespace NuGetGallery
                 return latestPrereleaseVersion > NuGetVersion;
             }
         }
-        
+
         public bool HasNewerRelease
         {
             get
@@ -128,6 +130,9 @@ namespace NuGetGallery
         public string ProjectUrl { get; set; }
         public string LicenseUrl { get; set; }
         public IEnumerable<string> LicenseNames { get; set; }
+        public string LicenseExpression { get; set; }
+        public IReadOnlyCollection<CompositeLicenseExpressionSegment> LicenseExpressionSegments { get; set; }
+        public EmbeddedLicenseFileType EmbeddedLicenseType { get; set; }
 
         private IDictionary<User, string> _pushedByCache = new Dictionary<User, string>();
 

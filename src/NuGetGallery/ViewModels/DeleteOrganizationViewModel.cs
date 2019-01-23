@@ -3,6 +3,7 @@
 
 using System.Collections.Generic;
 using System.Linq;
+using NuGet.Services.Entities;
 
 namespace NuGetGallery
 {
@@ -12,7 +13,7 @@ namespace NuGetGallery
             Organization organizationToDelete, 
             User currentUser, 
             IPackageService packageService)
-            : base(organizationToDelete, currentUser, packageService, p => p.HasSingleOrganizationOwner)
+            : base(organizationToDelete, currentUser, packageService)
         {
             AdditionalMembers = organizationToDelete.Members
                 .Where(m => !m.Member.MatchesUser(currentUser))

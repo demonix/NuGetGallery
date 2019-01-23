@@ -7,10 +7,10 @@ using System.Linq;
 using System.Threading.Tasks;
 using System.Web.Mvc;
 using Moq;
+using NuGet.Services.Entities;
+using NuGet.Services.Messaging.Email;
 using NuGetGallery.Framework;
-using NuGetGallery.Infrastructure.Mail;
 using NuGetGallery.Infrastructure.Mail.Messages;
-using NuGetGallery.Infrastructure.Mail.Requests;
 using Xunit;
 
 namespace NuGetGallery.Controllers
@@ -576,7 +576,7 @@ namespace NuGetGallery.Controllers
                         Assert.True(data.success);
 
                         packageOwnershipManagementService.Verify(x => x.DeletePackageOwnershipRequestAsync(package, requestedUser, true));
-                        
+
                         GetMock<IMessageService>()
                             .Verify(x => x.SendMessageAsync(
                                 It.Is<PackageOwnershipRequestCanceledMessage>(
@@ -586,6 +586,54 @@ namespace NuGetGallery.Controllers
                                     && msg.PackageRegistration == package),
                                 false,
                                 false));
+                    }
+
+                    [Theory]
+                    [MemberData(nameof(AllCanManagePackageOwnersPairedWithCanBeRemoved_Data))]
+                    public async Task FailsIfAttemptingToRemoveLastOwner(Func<Fakes, User> getCurrentUser, Func<Fakes, User> getUserToRemove)
+                    {
+                        // Arrange
+                        var fakes = Get<Fakes>();
+                        var currentUser = getCurrentUser(fakes);
+                        var userToRemove = getUserToRemove(fakes);
+                        var package = fakes.Package;
+                        var controller = GetController<JsonApiController>();
+                        controller.SetCurrentUser(currentUser);
+
+                        foreach (var owner in package.Owners.Where(o => !o.MatchesUser(userToRemove)).ToList())
+                        {
+                            package.Owners.Remove(owner);
+                        }
+
+                        var packageOwnershipManagementService = GetMock<IPackageOwnershipManagementService>();
+
+                        packageOwnershipManagementService
+                            .Setup(x => x.GetPackageOwnershipRequests(package, null, userToRemove))
+                            .Returns(Enumerable.Empty<PackageOwnerRequest>());
+
+                        // Act
+                        var result = await controller.RemovePackageOwner(package.Id, userToRemove.Username);
+                        dynamic data = result.Data;
+
+                        // Assert
+                        Assert.False(data.success);
+
+                        packageOwnershipManagementService
+                            .Verify(
+                                x => x.RemovePackageOwnerAsync(package, currentUser, userToRemove, It.IsAny<bool>()),
+                                Times.Never());
+
+                        GetMock<IMessageService>()
+                            .Verify(
+                                x => x.SendMessageAsync(
+                                    It.Is<PackageOwnerRemovedMessage>(
+                                        msg =>
+                                        msg.FromUser == currentUser
+                                        && msg.ToUser == userToRemove
+                                        && msg.PackageRegistration == package),
+                                    false,
+                                    false),
+                                Times.Never());
                     }
 
                     [Theory]
