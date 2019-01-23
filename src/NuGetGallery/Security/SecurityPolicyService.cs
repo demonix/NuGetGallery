@@ -8,6 +8,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using System.Web;
 using Autofac;
+using NuGet.Services.Entities;
 using NuGetGallery.Auditing;
 using NuGetGallery.Configuration;
 using NuGetGallery.Diagnostics;
@@ -353,7 +354,10 @@ namespace NuGetGallery.Security
             var subscribed = FindPolicies(user, subscription);
             var required = subscription.Policies;
 
-            return required.All(rp => subscribed.Any(sp => sp.Equals(rp)));
+            return required.All(rp => 
+                    subscribed.Any(sp => 
+                        string.Equals(sp.Name, rp.Name, StringComparison.OrdinalIgnoreCase)
+                        && string.Equals(sp.Subscription, rp.Subscription, StringComparison.OrdinalIgnoreCase)));
         }
 
         /// <summary>

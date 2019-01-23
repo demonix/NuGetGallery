@@ -7,6 +7,7 @@ using System.Linq;
 using System.Security.Principal;
 using System.Web;
 using Newtonsoft.Json;
+using NuGet.Services.Entities;
 using NuGet.Versioning;
 using NuGetGallery.Authentication;
 using NuGetGallery.Diagnostics;
@@ -18,6 +19,7 @@ namespace NuGetGallery
         internal class Events
         {
             public const string ODataQueryFilter = "ODataQueryFilter";
+            public const string ODataCustomQuery = "ODataCustomQuery";
             public const string PackagePush = "PackagePush";
             public const string PackagePushFailure = "PackagePushFailure";
             public const string CreatePackageVerificationKey = "CreatePackageVerificationKey";
@@ -61,6 +63,10 @@ namespace NuGetGallery
             public const string TyposquattingChecklistRetrievalTimeInMs = "TyposquattingChecklistRetrievalTimeInMs";
             public const string TyposquattingAlgorithmProcessingTimeInMs = "TyposquattingAlgorithmProcessingTimeInMs";
             public const string TyposquattingOwnersCheckTimeInMs = "TyposquattingOwnersCheckTimeInMs";
+            public const string InvalidLicenseMetadata = "InvalidLicenseMetadata";
+            public const string NonFsfOsiLicenseUsed = "NonFsfOsiLicenseUsed";
+            public const string LicenseFileRejected = "LicenseFileRejected";
+            public const string LicenseValidationFailed = "LicenseValidationFailed";
         }
 
         private IDiagnosticsSource _diagnosticsSource;
@@ -71,12 +77,15 @@ namespace NuGetGallery
             ReferenceLoopHandling = ReferenceLoopHandling.Ignore,
             Formatting = Formatting.None
         };
-        
+
         // ODataQueryFilter properties
         public const string CallContext = "CallContext";
         public const string IsEnabled = "IsEnabled";
         public const string IsAllowed = "IsAllowed";
         public const string QueryPattern = "QueryPattern";
+
+        // ODataCustomQuery properties
+        public const string IsCustomQuery = "IsCustomQuery";
 
         // Package push properties
         public const string AuthenticationMethod = "AuthenticationMethod";
@@ -145,6 +154,10 @@ namespace NuGetGallery
         public const string CollisionPackageIdsCount = "CollisionPackageIdsCount";
         public const string CheckListLength = "CheckListLength";
         public const string HasExtraCollisionPackageIds = "HasExtraCollisionPackageIds";
+        public const string CheckListCacheExpireTimeInHours = "CheckListCacheExpireTimeInHours";
+
+        // License related properties
+        public const string LicenseExpression = "LicenseExpression";
 
         public TelemetryService(IDiagnosticsService diagnosticsService, ITelemetryClient telemetryClient = null)
         {
@@ -182,6 +195,14 @@ namespace NuGetGallery
 
                 properties.Add(IsAllowed, $"{isAllowed}");
                 properties.Add(QueryPattern, queryPattern);
+            });
+        }
+
+        public void TrackODataCustomQuery(bool? customQuery)
+        {
+            TrackMetric(Events.ODataCustomQuery, 1, properties =>
+            {
+                properties.Add(IsCustomQuery, customQuery?.ToString() ?? "Unknown");
             });
         }
 
@@ -460,12 +481,12 @@ namespace NuGetGallery
         }
         private static string GetClientVersion()
         {
-            return HttpContext.Current?.Request?.Headers[Constants.ClientVersionHeaderName];
+            return HttpContext.Current?.Request?.Headers[GalleryConstants.ClientVersionHeaderName];
         }
 
         private static string GetProtocolVersion()
         {
-            return HttpContext.Current?.Request?.Headers[Constants.NuGetProtocolHeaderName];
+            return HttpContext.Current?.Request?.Headers[GalleryConstants.NuGetProtocolHeaderName];
         }
 
         private static string GetClientInformation()
@@ -709,15 +730,17 @@ namespace NuGetGallery
             TimeSpan totalTime,
             bool wasUploadBlocked,
             List<string> collisionPackageIds,
-            int checklistLength)
+            int checkListLength,
+            TimeSpan checkListCacheExpireTime)
         {
             TrackMetric(Events.TyposquattingCheckResultAndTotalTimeInMs, totalTime.TotalMilliseconds, properties => {
                 properties.Add(PackageId, packageId);
                 properties.Add(WasUploadBlocked, wasUploadBlocked.ToString());
                 properties.Add(CollisionPackageIds, string.Join(",", collisionPackageIds.Take(TyposquattingCollisionIdsMaxPropertyValue)));
                 properties.Add(CollisionPackageIdsCount, collisionPackageIds.Count.ToString());
-                properties.Add(CheckListLength, checklistLength.ToString());
+                properties.Add(CheckListLength, checkListLength.ToString());
                 properties.Add(HasExtraCollisionPackageIds, (collisionPackageIds.Count > TyposquattingCollisionIdsMaxPropertyValue).ToString());
+                properties.Add(CheckListCacheExpireTimeInHours, checkListCacheExpireTime.ToString());
             });
         }
 
@@ -755,5 +778,17 @@ namespace NuGetGallery
 
             _telemetryClient.TrackMetric(metricName, value, telemetryProperties);
         }
+
+        public void TrackInvalidLicenseMetadata(string licenseValue)
+            => TrackMetric(Events.InvalidLicenseMetadata, 1, p => p.Add(LicenseExpression, licenseValue));
+
+        public void TrackNonFsfOsiLicenseUse(string licenseExpression)
+            => TrackMetric(Events.NonFsfOsiLicenseUsed, 1, p => p.Add(LicenseExpression, licenseExpression));
+
+        public void TrackLicenseFileRejected()
+            => TrackMetric(Events.LicenseFileRejected, 1, p => { });
+
+        public void TrackLicenseValidationFailure()
+            => TrackMetric(Events.LicenseValidationFailed, 1, p => { });
     }
 }

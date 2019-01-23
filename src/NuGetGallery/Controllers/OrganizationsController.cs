@@ -7,10 +7,11 @@ using System.Linq;
 using System.Net;
 using System.Threading.Tasks;
 using System.Web.Mvc;
+using NuGet.Services.Entities;
+using NuGet.Services.Messaging.Email;
 using NuGetGallery.Authentication;
 using NuGetGallery.Filters;
 using NuGetGallery.Helpers;
-using NuGetGallery.Infrastructure.Mail;
 using NuGetGallery.Infrastructure.Mail.Messages;
 using NuGetGallery.Security;
 
@@ -352,7 +353,7 @@ namespace NuGetGallery
 
             var model = GetDeleteOrganizationViewModel(account);
 
-            if (model.HasOrphanPackages)
+            if (model.HasPackagesThatWillBeOrphaned)
             {
                 TempData["ErrorMessage"] = "You cannot delete your organization unless you transfer ownership of all of its packages to another account.";
 

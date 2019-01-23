@@ -24,8 +24,6 @@ namespace NuGetGallery
 
         public string SemVerLevel { get; set; }
 
-        public CuratedFeed CuratedFeed { get; set; }
-
         public SortOrder SortOrder { get; set; }
 
         public string SupportedFramework { get; set; }

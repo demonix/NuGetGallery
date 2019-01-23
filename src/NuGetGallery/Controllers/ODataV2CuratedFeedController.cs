@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using System.Web.Http;
 using System.Web.Http.OData;
 using System.Web.Http.OData.Query;
+using NuGet.Services.Entities;
 using NuGetGallery.Configuration;
 using NuGetGallery.OData;
 using NuGetGallery.OData.QueryInterceptors;
@@ -24,19 +25,17 @@ namespace NuGetGallery.Controllers
 
         private readonly IGalleryConfigurationService _configurationService;
         private readonly ISearchService _searchService;
-        private readonly ICuratedFeedService _curatedFeedService;
         private readonly IEntityRepository<Package> _packagesRepository;
 
         public ODataV2CuratedFeedController(
             IGalleryConfigurationService configurationService,
             ISearchService searchService,
-            ICuratedFeedService curatedFeedService,
-            IEntityRepository<Package> packagesRepository)
-            : base(configurationService)
+            IEntityRepository<Package> packagesRepository,
+            ITelemetryService telemetryService)
+            : base(configurationService, telemetryService)
         {
             _configurationService = configurationService;
             _searchService = searchService;
-            _curatedFeedService = curatedFeedService;
             _packagesRepository = packagesRepository;
         }
 
@@ -67,7 +66,7 @@ namespace NuGetGallery.Controllers
                     semVerLevelKey)
                 .InterceptWith(new NormalizeVersionInterceptor());
 
-            return QueryResult(options, queryable, MaxPageSize);
+            return TrackedQueryResult(options, queryable, MaxPageSize, customQuery: true);
         }
 
         // /api/v2/curated-feed/curatedFeedName/Packages/$count?semVerLevel=
@@ -107,7 +106,7 @@ namespace NuGetGallery.Controllers
                 var emptyResult = Enumerable.Empty<Package>().AsQueryable()
                     .ToV2FeedPackageQuery(GetSiteRoot(), _configurationService.Features.FriendlyLicenses, semVerLevelKey);
 
-                return QueryResult(options, emptyResult, MaxPageSize);
+                return TrackedQueryResult(options, emptyResult, MaxPageSize, customQuery: false);
             }
 
             return await GetCore(options, curatedFeedName, id, normalizedVersion: null, return404NotFoundWhenNoResults: false, semVerLevel: semVerLevel);
@@ -152,6 +151,7 @@ namespace NuGetGallery.Controllers
             }
 
             var semVerLevelKey = SemVerLevelKey.ForSemVerLevel(semVerLevel);
+            bool? customQuery = null;
 
             // try the search service
             try
@@ -162,12 +162,13 @@ namespace NuGetGallery.Controllers
                     packages,
                     id,
                     normalizedVersion,
-                    curatedFeed: result.CuratedFeed,
                     semVerLevel: semVerLevel);
 
                 // If intercepted, create a paged queryresult
                 if (searchAdaptorResult.ResultsAreProvidedBySearchService)
                 {
+                    customQuery = false;
+
                     // Packages provided by search service
                     packages = searchAdaptorResult.Packages;
 
@@ -176,6 +177,7 @@ namespace NuGetGallery.Controllers
 
                     if (return404NotFoundWhenNoResults && totalHits == 0)
                     {
+                        _telemetryService.TrackODataCustomQuery(customQuery);
                         return NotFound();
                     }
 
@@ -183,8 +185,17 @@ namespace NuGetGallery.Controllers
                         .Take(options.Top != null ? Math.Min(options.Top.Value, MaxPageSize) : MaxPageSize)
                         .ToV2FeedPackageQuery(GetSiteRoot(), _configurationService.Features.FriendlyLicenses, semVerLevelKey);
 
-                    return QueryResult(options, pagedQueryable, MaxPageSize, totalHits, (o, s, resultCount) =>
-                       SearchAdaptor.GetNextLink(Request.RequestUri, resultCount, new { id }, o, s, semVerLevelKey));
+                    return TrackedQueryResult(
+                        options,
+                        pagedQueryable,
+                        MaxPageSize,
+                        totalHits,
+                        (o, s, resultCount) => SearchAdaptor.GetNextLink(Request.RequestUri, resultCount, new { id }, o, s, semVerLevelKey),
+                        customQuery);
+                }
+                else
+                {
+                    customQuery = true;
                 }
             }
             catch (Exception ex)
@@ -196,6 +207,7 @@ namespace NuGetGallery.Controllers
 
             if (return404NotFoundWhenNoResults && !packages.Any())
             {
+                _telemetryService.TrackODataCustomQuery(customQuery);
                 return NotFound();
             }
 
@@ -204,7 +216,7 @@ namespace NuGetGallery.Controllers
                 _configurationService.Features.FriendlyLicenses, 
                 semVerLevelKey);
 
-            return QueryResult(options, queryable, MaxPageSize);
+            return TrackedQueryResult(options, queryable, MaxPageSize, customQuery);
         }
 
         // /api/v2/curated-feed/curatedFeedName/Packages(Id=,Version=)/propertyName
@@ -270,17 +282,19 @@ namespace NuGetGallery.Controllers
                 searchTerm,
                 targetFramework,
                 includePrerelease,
-                curatedFeed: result.CuratedFeed,
                 semVerLevel: semVerLevel);
 
             // Packages provided by search service (even when not hijacked)
             var query = searchAdaptorResult.Packages;
 
             var semVerLevelKey = SemVerLevelKey.ForSemVerLevel(semVerLevel);
+            bool? customQuery = null;
 
             // If intercepted, create a paged queryresult
             if (searchAdaptorResult.ResultsAreProvidedBySearchService)
             {
+                customQuery = false;
+
                 // Add explicit Take() needed to limit search hijack result set size if $top is specified
                 var totalHits = query.LongCount();
                 var pagedQueryable = query
@@ -290,22 +304,32 @@ namespace NuGetGallery.Controllers
                         _configurationService.Features.FriendlyLicenses, 
                         semVerLevelKey);
 
-                return QueryResult(options, pagedQueryable, MaxPageSize, totalHits, (o, s, resultCount) =>
-                {
-                    // The nuget.exe 2.x list command does not like the next link at the bottom when a $top is passed.
-                    // Strip it of for backward compatibility.
-                    if (o.Top == null || (resultCount.HasValue && o.Top.Value >= resultCount.Value))
+                return TrackedQueryResult(
+                    options,
+                    pagedQueryable,
+                    MaxPageSize,
+                    totalHits,
+                    (o, s, resultCount) =>
                     {
-                        return SearchAdaptor.GetNextLink(
-                            Request.RequestUri, 
-                            resultCount, 
-                            new { searchTerm, targetFramework, includePrerelease }, 
-                            o, 
-                            s,
-                            semVerLevelKey);
-                    }
-                    return null;
-                });
+                        // The nuget.exe 2.x list command does not like the next link at the bottom when a $top is passed.
+                        // Strip it of for backward compatibility.
+                        if (o.Top == null || (resultCount.HasValue && o.Top.Value >= resultCount.Value))
+                        {
+                            return SearchAdaptor.GetNextLink(
+                                Request.RequestUri, 
+                                resultCount, 
+                                new { searchTerm, targetFramework, includePrerelease }, 
+                                o, 
+                                s,
+                                semVerLevelKey);
+                        }
+                        return null;
+                    },
+                    customQuery);
+            }
+            else
+            {
+                customQuery = true;
             }
 
             // If not, just let OData handle things
@@ -314,7 +338,7 @@ namespace NuGetGallery.Controllers
                 _configurationService.Features.FriendlyLicenses, 
                 semVerLevelKey);
 
-            return QueryResult(options, queryable, MaxPageSize);
+            return TrackedQueryResult(options, queryable, MaxPageSize, customQuery);
         }
 
         // /api/v2/curated-feed/curatedFeedName/Search()/$count?searchTerm=&targetFramework=&includePrerelease=
@@ -347,25 +371,14 @@ namespace NuGetGallery.Controllers
 
         private CuratedFeedResult GetCuratedFeedResult(string curatedFeedName)
         {
-            IQueryable<Package> packages;
-            CuratedFeed curatedFeed;
             if (IsCuratedFeedRedirected(curatedFeedName))
             {
-                curatedFeed = null;
-                packages = _packagesRepository.GetAll();
+                return new CuratedFeedResult(_packagesRepository.GetAll());
             }
             else
             {
-                curatedFeed = _curatedFeedService.GetFeedByName(curatedFeedName);
-                if (curatedFeed == null)
-                {
-                    return new CuratedFeedResult(NotFound());
-                }
-
-                packages = _curatedFeedService.GetPackages(curatedFeedName);
+                return new CuratedFeedResult(NotFound());
             }
-
-            return new CuratedFeedResult(packages, curatedFeed);
         }
 
         private class CuratedFeedResult
@@ -375,14 +388,12 @@ namespace NuGetGallery.Controllers
                 ActionResult = actionResult ?? throw new ArgumentNullException(nameof(actionResult));
             }
 
-            public CuratedFeedResult(IQueryable<Package> packages, CuratedFeed curatedFeed)
+            public CuratedFeedResult(IQueryable<Package> packages)
             {
                 Packages = packages ?? throw new ArgumentNullException(nameof(packages));
-                CuratedFeed = curatedFeed;
             }
 
             public IQueryable<Package> Packages { get; }
-            public CuratedFeed CuratedFeed { get; }
             public IHttpActionResult ActionResult { get; }
         }
     }

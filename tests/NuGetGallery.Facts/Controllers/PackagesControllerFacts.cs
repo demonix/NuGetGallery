@@ -15,6 +15,9 @@ using System.Web.Mvc;
 using System.Web.Routing;
 using Moq;
 using NuGet.Packaging;
+using NuGet.Services.Entities;
+using NuGet.Services.Licenses;
+using NuGet.Services.Messaging.Email;
 using NuGet.Services.Validation;
 using NuGet.Services.Validation.Issues;
 using NuGet.Versioning;
@@ -27,7 +30,6 @@ using NuGetGallery.Configuration;
 using NuGetGallery.Diagnostics;
 using NuGetGallery.Framework;
 using NuGetGallery.Helpers;
-using NuGetGallery.Infrastructure.Mail;
 using NuGetGallery.Infrastructure.Mail.Messages;
 using NuGetGallery.Infrastructure.Mail.Requests;
 using NuGetGallery.Packaging;
@@ -64,7 +66,10 @@ namespace NuGetGallery
             Mock<IPackageOwnershipManagementService> packageOwnershipManagementService = null,
             IReadMeService readMeService = null,
             Mock<IContentObjectService> contentObjectService = null,
-            Mock<ISymbolPackageUploadService> symbolPackageUploadService = null)
+            Mock<ISymbolPackageUploadService> symbolPackageUploadService = null,
+            Mock<IFlatContainerService> flatContainerService = null,
+            Mock<ICoreLicenseFileService> coreLicenseFileService = null,
+            Mock<ILicenseExpressionSplitter> licenseExpressionSplitter = null)
         {
             packageService = packageService ?? new Mock<IPackageService>();
             if (uploadFileService == null)
@@ -165,6 +170,25 @@ namespace NuGetGallery
                     .Setup(x => x.DeleteSymbolsPackageAsync(It.IsAny<SymbolPackage>()))
                     .Completes();
             }
+
+            if (flatContainerService == null)
+            {
+                flatContainerService = new Mock<IFlatContainerService>();
+                flatContainerService
+                    .Setup(x => x.GetLicenseFileFlatContainerUrlAsync(It.IsAny<string>(), It.IsAny<string>()))
+                    .ReturnsAsync("");
+            }
+
+            if (coreLicenseFileService == null)
+            {
+                coreLicenseFileService = new Mock<ICoreLicenseFileService>();
+                coreLicenseFileService
+                    .Setup(clfs => clfs.DownloadLicenseFileAsync(It.IsAny<Package>()))
+                    .ReturnsAsync(() => new MemoryStream());
+            }
+
+            licenseExpressionSplitter = licenseExpressionSplitter ?? new Mock<ILicenseExpressionSplitter>();
+
             var diagnosticsService = new Mock<IDiagnosticsService>();
             var controller = new Mock<PackagesController>(
                 packageService.Object,
@@ -189,7 +213,10 @@ namespace NuGetGallery
                 packageOwnershipManagementService.Object,
                 contentObjectService.Object,
                 symbolPackageUploadService.Object,
-                diagnosticsService.Object);
+                diagnosticsService.Object,
+                flatContainerService.Object,
+                coreLicenseFileService.Object,
+                licenseExpressionSplitter.Object);
 
             controller.CallBase = true;
             controller.Object.SetOwinContextOverride(Fakes.CreateOwinContext());
@@ -274,7 +301,7 @@ namespace NuGetGallery
                     It.IsAny<User>(),
                     It.IsAny<bool>()))
                 .ReturnsAsync(new PackageValidationResult(
-                    type, message: "Something", warnings: null));
+                    type, message: new PlainTextOnlyValidationMessage("Something"), warnings: null));
 
             return fakePackageUploadService;
         }
@@ -627,7 +654,7 @@ namespace NuGetGallery
                 indexingService.Setup(i => i.GetLastWriteTime()).Returns(Task.FromResult((DateTime?)DateTime.UtcNow));
 
                 // Act
-                var result = await controller.DisplayPackage("Foo", Constants.AbsoluteLatestUrlString);
+                var result = await controller.DisplayPackage("Foo", GalleryConstants.AbsoluteLatestUrlString);
 
                 // Assert
                 var model = ResultAssert.IsView<DisplayPackageViewModel>(result);
@@ -814,6 +841,58 @@ namespace NuGetGallery
                 // Assert
                 var model = ResultAssert.IsView<DisplayPackageViewModel>(result);
                 Assert.Equal(model.PackageValidationIssues, expectedIssues);
+            }
+
+            [Fact]
+            public async Task SplitsLicenseExpressionWhenProvided()
+            {
+                const string expression = "some expression";
+                var splitterMock = new Mock<ILicenseExpressionSplitter>();
+                var packageService = new Mock<IPackageService>();
+                var indexingService = new Mock<IIndexingService>();
+
+                var segments = new List<CompositeLicenseExpressionSegment>();
+                splitterMock
+                    .Setup(les => les.SplitExpression(expression))
+                    .Returns(segments);
+
+                var package = new Package()
+                {
+                    PackageRegistration = new PackageRegistration()
+                    {
+                        Id = "Foo",
+                        Owners = new List<User>()
+                    },
+                    Version = "01.1.01",
+                    NormalizedVersion = "1.1.1",
+                    Title = "A test package!",
+                    LicenseExpression = expression,
+                };
+
+                packageService.Setup(p => p.FindPackageByIdAndVersion(
+                                                It.Is<string>(s => s == "Foo"),
+                                                It.Is<string>(s => s == null),
+                                                It.Is<int>(i => i == SemVerLevelKey.SemVer2),
+                                                It.Is<bool>(b => b == true)))
+                    .Returns(package);
+
+                indexingService.Setup(i => i.GetLastWriteTime()).Returns(Task.FromResult((DateTime?)DateTime.UtcNow));
+
+                var controller = CreateController(
+                    GetConfigurationService(),
+                    packageService: packageService,
+                    indexingService: indexingService,
+                    licenseExpressionSplitter: splitterMock);
+
+                var result = await controller.DisplayPackage(id: "Foo", version: null);
+
+                splitterMock
+                    .Verify(les => les.SplitExpression(expression), Times.Once);
+                splitterMock
+                    .Verify(les => les.SplitExpression(It.IsAny<string>()), Times.Once);
+
+                var model = ResultAssert.IsView<DisplayPackageViewModel>(result);
+                Assert.Same(segments, model.LicenseExpressionSegments);
             }
 
             private class TestIssue : ValidationIssue
@@ -3982,7 +4061,7 @@ namespace NuGetGallery
                 var packageId = "CrestedGecko";
                 var packageVersion = "1.4.2";
 
-                var fakeFileStream = TestPackage.CreateTestPackageStream(packageId, packageVersion);
+                Stream fakeFileStream = TestPackage.CreateTestPackageStream(packageId, packageVersion);
                 var fakeUploadFileService = new Mock<IUploadFileService>();
                 fakeUploadFileService.Setup(x => x.DeleteUploadFileAsync(It.IsAny<int>())).Returns(Task.FromResult(0));
                 fakeUploadFileService.Setup(x => x.GetUploadFileAsync(It.IsAny<int>())).Returns(Task.FromResult(fakeFileStream));
@@ -4033,7 +4112,7 @@ namespace NuGetGallery
             {
                 var expectedMessage = "Bad, bad package!";
                 var currentUser = TestUtility.FakeUser;
-                var fakeFileStream = TestPackage.CreateTestPackageStream("CrestedGecko", "1.4.2");
+                Stream fakeFileStream = TestPackage.CreateTestPackageStream("CrestedGecko", "1.4.2");
 
                 var fakeUserService = new Mock<IUserService>();
                 fakeUserService
@@ -4067,7 +4146,7 @@ namespace NuGetGallery
             {
                 var expectedMessage = "Tricky package!";
                 var currentUser = TestUtility.FakeUser;
-                var fakeFileStream = TestPackage.CreateTestPackageStream("CrestedGecko", "1.4.2");
+                Stream fakeFileStream = TestPackage.CreateTestPackageStream("CrestedGecko", "1.4.2");
 
                 var fakeUserService = new Mock<IUserService>();
                 fakeUserService
@@ -4080,7 +4159,7 @@ namespace NuGetGallery
                 var fakePackageUploadService = new Mock<IPackageUploadService>();
                 fakePackageUploadService
                     .Setup(x => x.ValidateBeforeGeneratePackageAsync(It.IsAny<PackageArchiveReader>(), It.IsAny<PackageMetadata>()))
-                    .ReturnsAsync(PackageValidationResult.AcceptedWithWarnings(new[] { expectedMessage }));
+                    .ReturnsAsync(PackageValidationResult.AcceptedWithWarnings(new[] { new PlainTextOnlyValidationMessage(expectedMessage) }));
 
                 var controller = CreateController(
                     GetConfigurationService(),
@@ -4095,7 +4174,7 @@ namespace NuGetGallery
                 Assert.NotNull(result.InProgressUpload);
                 Assert.False(controller.TempData.ContainsKey("Message"));
                 var actualMessage = Assert.Single(result.InProgressUpload.Warnings);
-                Assert.Equal(expectedMessage, actualMessage);
+                Assert.Equal(expectedMessage, actualMessage.PlainTextMessage);
             }
 
             [Fact]
@@ -4103,7 +4182,7 @@ namespace NuGetGallery
             {
                 var expectedMessage = "Tricky package!";
                 var currentUser = TestUtility.FakeUser;
-                var fakeFileStream = TestPackage.CreateTestSymbolPackageStream("CrestedGecko", "1.4.2");
+                Stream fakeFileStream = TestPackage.CreateTestSymbolPackageStream("CrestedGecko", "1.4.2");
 
                 var fakeUserService = new Mock<IUserService>();
                 fakeUserService
@@ -4176,7 +4255,7 @@ namespace NuGetGallery
                 var result = await controller.UploadPackage(null) as JsonResult;
 
                 Assert.NotNull(result);
-                Assert.Equal(Strings.UploadFileIsRequired, (result.Data as string[])[0]);
+                Assert.Equal(Strings.UploadFileIsRequired, (result.Data as JsonValidationMessage[])[0].PlainTextMessage);
             }
 
             [Fact]
@@ -4190,7 +4269,7 @@ namespace NuGetGallery
                 var result = await controller.UploadPackage(fakeUploadedFile.Object) as JsonResult;
 
                 Assert.NotNull(result);
-                Assert.Equal(Strings.UploadFileMustBeNuGetPackage, (result.Data as string[])[0]);
+                Assert.Equal(Strings.UploadFileMustBeNuGetPackage, (result.Data as JsonValidationMessage[])[0].PlainTextMessage);
             }
 
             [Fact]
@@ -4210,7 +4289,7 @@ namespace NuGetGallery
                 var result = await controller.UploadPackage(fakeUploadedFile.Object) as JsonResult;
 
                 Assert.NotNull(result);
-                Assert.Equal(Strings.FailedToReadUploadFile, (result.Data as string[])[0]);
+                Assert.Equal(Strings.FailedToReadUploadFile, (result.Data as JsonValidationMessage[])[0].PlainTextMessage);
             }
 
             private const string EnsureValidExceptionMessage = "naughty package";
@@ -4238,7 +4317,9 @@ namespace NuGetGallery
                 var result = await controller.UploadPackage(fakeUploadedFile.Object) as JsonResult;
 
                 Assert.NotNull(result);
-                Assert.Equal(expectExceptionMessageInResponse ? EnsureValidExceptionMessage : Strings.FailedToReadUploadFile, (result.Data as string[])[0]);
+                Assert.Equal(
+                    expectExceptionMessageInResponse ? EnsureValidExceptionMessage : Strings.FailedToReadUploadFile,
+                    (result.Data as JsonValidationMessage[])[0].PlainTextMessage);
             }
 
             [Theory]
@@ -4264,7 +4345,7 @@ namespace NuGetGallery
                 var result = await controller.UploadPackage(fakeUploadedFile.Object) as JsonResult;
 
                 Assert.NotNull(result);
-                Assert.Equal($"The package manifest contains an invalid ID: '{packageId}'", (result.Data as string[])[0]);
+                Assert.Equal($"The package manifest contains an invalid ID: '{packageId}'", (result.Data as JsonValidationMessage[])[0].PlainTextMessage);
             }
 
             [Theory]
@@ -4286,7 +4367,7 @@ namespace NuGetGallery
                 var result = await controller.UploadPackage(fakeUploadedFile.Object) as JsonResult;
 
                 Assert.NotNull(result);
-                Assert.StartsWith($"An error occurred while parsing EntityName.", (result.Data as string[])[0]);
+                Assert.StartsWith($"An error occurred while parsing EntityName.", (result.Data as JsonValidationMessage[])[0].PlainTextMessage);
             }
 
             public static IEnumerable<object[]> WillShowTheViewWithErrorsWhenThePackageIdIsAlreadyBeingUsed_Data
@@ -4317,7 +4398,7 @@ namespace NuGetGallery
                 var result = await controller.UploadPackage(fakeUploadedFile.Object) as JsonResult;
 
                 Assert.NotNull(result);
-                Assert.Equal(String.Format(Strings.PackageIdNotAvailable, "theId"), (result.Data as string[])[0]);
+                Assert.Equal(String.Format(Strings.PackageIdNotAvailable, "theId"), (result.Data as JsonValidationMessage[])[0].PlainTextMessage);
             }
 
             public static IEnumerable<object[]> WillShowTheViewWithErrorsWhenThePackageIdMatchesUnownedNamespace_Data
@@ -4336,7 +4417,7 @@ namespace NuGetGallery
             {
                 var fakeUploadedFile = new Mock<HttpPostedFileBase>();
                 fakeUploadedFile.Setup(x => x.FileName).Returns("theFile.nupkg");
-                var fakeFileStream = TestPackage.CreateTestPackageStream("Random.Package1", "1.0.0");
+                Stream fakeFileStream = TestPackage.CreateTestPackageStream("Random.Package1", "1.0.0");
                 fakeUploadedFile.Setup(x => x.InputStream).Returns(fakeFileStream);
 
                 var fakeUploadFileService = new Mock<IUploadFileService>();
@@ -4367,7 +4448,7 @@ namespace NuGetGallery
                 var result = await controller.UploadPackage(fakeUploadedFile.Object) as JsonResult;
 
                 Assert.NotNull(result);
-                Assert.Equal(String.Format(Strings.UploadPackage_IdNamespaceConflict), (result.Data as string[])[0]);
+                Assert.Equal(String.Format(Strings.UploadPackage_IdNamespaceConflict), (result.Data as JsonValidationMessage[])[0].PlainTextMessage);
                 fakeTelemetryService.Verify(
                     x => x.TrackPackagePushNamespaceConflictEvent(
                         It.IsAny<string>(),
@@ -4398,7 +4479,7 @@ namespace NuGetGallery
                 fakeUploadedFile.Setup(x => x.FileName).Returns("theFile.nupkg");
                 var fakeUploadedFileStream = TestPackage.CreateTestPackageStream(packageId, version);
                 fakeUploadedFile.Setup(x => x.InputStream).Returns(fakeUploadedFileStream);
-                var fakeSavedFileStream = TestPackage.CreateTestPackageStream(packageId, version);
+                Stream fakeSavedFileStream = TestPackage.CreateTestPackageStream(packageId, version);
 
                 var fakeUploadFileService = new Mock<IUploadFileService>();
                 fakeUploadFileService.Setup(x => x.DeleteUploadFileAsync(currentUser.Key)).Returns(Task.FromResult(0));
@@ -4453,7 +4534,7 @@ namespace NuGetGallery
                 fakeUploadedFile.Setup(x => x.FileName).Returns("theFile.nupkg");
                 var fakeUploadedFileStream = TestPackage.CreateTestPackageStream(packageId, version);
                 fakeUploadedFile.Setup(x => x.InputStream).Returns(fakeUploadedFileStream);
-                var fakeSavedFileStream = TestPackage.CreateTestPackageStream(packageId, version);
+                Stream fakeSavedFileStream = TestPackage.CreateTestPackageStream(packageId, version);
 
                 var fakeUploadFileService = new Mock<IUploadFileService>();
                 fakeUploadFileService.Setup(x => x.DeleteUploadFileAsync(currentUser.Key)).Returns(Task.FromResult(0));
@@ -4517,7 +4598,7 @@ namespace NuGetGallery
                 Assert.NotNull(result);
                 Assert.Equal(
                     String.Format(Strings.PackageExistsAndCannotBeModified, "theId", "1.0.0"),
-                    (result.Data as string[])[0]);
+                    (result.Data as JsonValidationMessage[])[0].PlainTextMessage);
                 fakePackageDeleteService.Verify(
                     x => x.HardDeletePackagesAsync(
                         It.IsAny<IEnumerable<Package>>(),
@@ -4559,7 +4640,7 @@ namespace NuGetGallery
                 Assert.NotNull(result);
                 Assert.Equal(
                     String.Format(Strings.PackageVersionDiffersOnlyByMetadataAndCannotBeModified, "theId", "1.0.0+metadata"),
-                    (result.Data as string[])[0]);
+                    (result.Data as JsonValidationMessage[])[0].PlainTextMessage);
                 fakePackageDeleteService.Verify(
                     x => x.HardDeletePackagesAsync(
                         It.IsAny<IEnumerable<Package>>(),
@@ -4584,7 +4665,7 @@ namespace NuGetGallery
 
                 var fakeUploadedFile = new Mock<HttpPostedFileBase>();
                 fakeUploadedFile.Setup(x => x.FileName).Returns("theFile.nupkg");
-                var fakeFileStream = TestPackage.CreateTestPackageStream(id, version);
+                Stream fakeFileStream = TestPackage.CreateTestPackageStream(id, version);
                 fakeUploadedFile.Setup(x => x.InputStream).Returns(fakeFileStream);
                 var fakePackageService = new Mock<IPackageService>();
                 fakePackageService.Setup(x => x.FindPackageByIdAndVersionStrict(It.IsAny<string>(), It.IsAny<string>())).Returns(
@@ -4653,7 +4734,7 @@ namespace NuGetGallery
             {
                 var fakeUploadedFile = new Mock<HttpPostedFileBase>();
                 fakeUploadedFile.Setup(x => x.FileName).Returns("theFile.nupkg");
-                var fakeFileStream = TestPackage.CreateTestPackageStream("thePackageId", "1.0.0");
+                Stream fakeFileStream = TestPackage.CreateTestPackageStream("thePackageId", "1.0.0");
                 fakeUploadedFile.Setup(x => x.InputStream).Returns(fakeFileStream);
                 var fakeUploadFileService = new Mock<IUploadFileService>();
                 fakeUploadFileService.Setup(x => x.DeleteUploadFileAsync(TestUtility.FakeUser.Key)).Returns(Task.FromResult(0));
@@ -4707,7 +4788,7 @@ namespace NuGetGallery
                 var expectedMessage = "Bad package.";
                 var fakeUploadedFile = new Mock<HttpPostedFileBase>();
                 fakeUploadedFile.Setup(x => x.FileName).Returns(PackageId + ".nupkg");
-                var fakeFileStream = TestPackage.CreateTestPackageStream(PackageId, PackageVersion);
+                Stream fakeFileStream = TestPackage.CreateTestPackageStream(PackageId, PackageVersion);
                 fakeUploadedFile.Setup(x => x.InputStream).Returns(fakeFileStream);
                 var fakeUploadFileService = new Mock<IUploadFileService>();
                 fakeUploadFileService.Setup(x => x.DeleteUploadFileAsync(TestUtility.FakeUser.Key)).Returns(Task.FromResult(0));
@@ -4731,7 +4812,7 @@ namespace NuGetGallery
 
                 Assert.NotNull(result);
                 Assert.Equal((int)HttpStatusCode.BadRequest, controller.Response.StatusCode);
-                Assert.Equal(expectedMessage, (result.Data as string[])[0]);
+                Assert.Equal(expectedMessage, (result.Data as JsonValidationMessage[])[0].PlainTextMessage);
             }
 
 
@@ -4741,7 +4822,7 @@ namespace NuGetGallery
                 var expectedMessage = "Iffy package.";
                 var fakeUploadedFile = new Mock<HttpPostedFileBase>();
                 fakeUploadedFile.Setup(x => x.FileName).Returns(PackageId + ".nupkg");
-                var fakeFileStream = TestPackage.CreateTestPackageStream(PackageId, PackageVersion);
+                Stream fakeFileStream = TestPackage.CreateTestPackageStream(PackageId, PackageVersion);
                 fakeUploadedFile.Setup(x => x.InputStream).Returns(fakeFileStream);
                 var fakeUploadFileService = new Mock<IUploadFileService>();
                 fakeUploadFileService.Setup(x => x.DeleteUploadFileAsync(TestUtility.FakeUser.Key)).Returns(Task.FromResult(0));
@@ -4753,7 +4834,7 @@ namespace NuGetGallery
                 var fakePackageUploadService = GetValidPackageUploadService(PackageId, PackageVersion);
                 fakePackageUploadService
                     .Setup(x => x.ValidateBeforeGeneratePackageAsync(It.IsAny<PackageArchiveReader>(), It.IsAny<PackageMetadata>()))
-                    .ReturnsAsync(PackageValidationResult.AcceptedWithWarnings(new[] { expectedMessage }));
+                    .ReturnsAsync(PackageValidationResult.AcceptedWithWarnings(new[] { new PlainTextOnlyValidationMessage(expectedMessage) }));
 
                 var controller = CreateController(
                     GetConfigurationService(),
@@ -4766,7 +4847,7 @@ namespace NuGetGallery
                 Assert.NotNull(result);
                 var data = Assert.IsAssignableFrom<VerifyPackageRequest>(result.Data);
                 var actualMessage = Assert.Single(data.Warnings);
-                Assert.Equal(expectedMessage, actualMessage);
+                Assert.Equal(expectedMessage, actualMessage.PlainTextMessage);
             }
 
             [Fact]
@@ -4790,7 +4871,7 @@ namespace NuGetGallery
                 var result = await controller.UploadPackage(fakeUploadedFile.Object) as JsonResult;
 
                 Assert.NotNull(result);
-                Assert.Equal(Strings.FailedToReadUploadFile, (result.Data as string[])[0]);
+                Assert.Equal(Strings.FailedToReadUploadFile, (result.Data as JsonValidationMessage[])[0].PlainTextMessage);
             }
 
             [Fact]
@@ -4825,7 +4906,7 @@ namespace NuGetGallery
 
                 Assert.NotNull(result);
                 Assert.Equal((int)HttpStatusCode.Conflict, controller.Response.StatusCode);
-                Assert.Equal(string.Format(Strings.PackageIdNotAvailable, packageId), (result.Data as string[])[0]);
+                Assert.Equal(string.Format(Strings.PackageIdNotAvailable, packageId), (result.Data as JsonValidationMessage[])[0].PlainTextMessage);
             }
 
             [Fact]
@@ -4861,7 +4942,7 @@ namespace NuGetGallery
 
                 Assert.NotNull(result);
                 Assert.Equal((int)HttpStatusCode.Forbidden, controller.Response.StatusCode);
-                Assert.Equal(string.Format(Strings.PackageIsLocked, packageId), (result.Data as string[])[0]);
+                Assert.Equal(string.Format(Strings.PackageIsLocked, packageId), (result.Data as JsonValidationMessage[])[0].PlainTextMessage);
             }
 
             public static IEnumerable<object[]> SymbolValidationResultTypes => Enum
@@ -4955,7 +5036,7 @@ namespace NuGetGallery
                 };
                 var fakeUploadedFile = new Mock<HttpPostedFileBase>();
                 fakeUploadedFile.Setup(x => x.FileName).Returns("theFile.snupkg");
-                var fakeFileStream = TestPackage.CreateTestSymbolPackageStream(packageId, "1.0.0");
+                Stream fakeFileStream = TestPackage.CreateTestSymbolPackageStream(packageId, "1.0.0");
                 fakeUploadedFile.Setup(x => x.InputStream).Returns(fakeFileStream);
                 var fakeUploadFileService = new Mock<IUploadFileService>();
                 fakeUploadFileService
@@ -5467,21 +5548,31 @@ namespace NuGetGallery
 
                     var jsonResult = Assert.IsType<JsonResult>(result);
                     Assert.Equal((int)HttpStatusCode.BadRequest, controller.Response.StatusCode);
-                    var message = (jsonResult.Data as string[])[0];
-                    Assert.Equal(expectedMessage, message);
+                    var message = (jsonResult.Data as JsonValidationMessage[])[0];
+                    Assert.Equal(expectedMessage, message.PlainTextMessage);
                 }
             }
 
             [Theory]
-            [InlineData(PackageValidationResultType.Invalid)]
-            [InlineData(PackageValidationResultType.PackageShouldNotBeSigned)]
-            [InlineData(PackageValidationResultType.PackageShouldNotBeSignedButCanManageCertificates)]
-            public async Task WillShowTheValidationMessageWhenValidationAfterGenerateFails(PackageValidationResultType type)
+            [InlineData(PackageValidationResultType.Invalid, false)]
+            [InlineData(PackageValidationResultType.Invalid, true)]
+            public async Task WillShowTheValidationMessageWhenValidationAfterGenerateFails(PackageValidationResultType type, bool hasRawHtml)
             {
                 var fakeUploadFileService = new Mock<IUploadFileService>();
                 using (var fakeFileStream = new MemoryStream())
                 {
-                    var expectedMessage = "The package is just bad.";
+                    const string expectedMessage = "The package is just bad.";
+                    var messageMock = new Mock<IValidationMessage>();
+                    messageMock
+                        .SetupGet(m => m.PlainTextMessage)
+                        .Returns(expectedMessage);
+                    messageMock
+                        .SetupGet(m => m.HasRawHtmlRepresentation)
+                        .Returns(hasRawHtml);
+                    messageMock
+                        .SetupGet(m => m.RawHtmlMessage)
+                        .Returns(hasRawHtml ? null : expectedMessage);
+                    var expectedResult = new PackageValidationResult(type, messageMock.Object);
 
                     fakeUploadFileService.Setup(x => x.GetUploadFileAsync(TestUtility.FakeUser.Key)).Returns(Task.FromResult<Stream>(fakeFileStream));
                     fakeUploadFileService.Setup(x => x.DeleteUploadFileAsync(TestUtility.FakeUser.Key)).Returns(Task.FromResult(0));
@@ -5493,7 +5584,7 @@ namespace NuGetGallery
                             It.IsAny<User>(),
                             It.IsAny<User>(),
                             It.IsAny<bool>()))
-                        .ReturnsAsync(new PackageValidationResult(type, expectedMessage));
+                        .ReturnsAsync(expectedResult);
                     var fakeNuGetPackage = TestPackage.CreateTestPackageStream(PackageId, PackageVersion);
 
                     var fakeUserService = new Mock<IUserService>();
@@ -5509,7 +5600,7 @@ namespace NuGetGallery
 
                     var result = await controller.VerifyPackage(new VerifyPackageRequest() { Listed = true, Owner = TestUtility.FakeUser.Username });
 
-                    VerifyPackageValidationResultMessage(type, expectedMessage, controller, result);
+                    VerifyPackageValidationResultMessage(type, expectedResult, controller, result);
                     fakePackageUploadService.Verify(
                         x => x.GeneratePackageAsync(
                             It.IsAny<string>(),
@@ -5522,15 +5613,25 @@ namespace NuGetGallery
             }
 
             [Theory]
-            [InlineData(PackageValidationResultType.Invalid)]
-            [InlineData(PackageValidationResultType.PackageShouldNotBeSigned)]
-            [InlineData(PackageValidationResultType.PackageShouldNotBeSignedButCanManageCertificates)]
-            public async Task WillShowTheValidationMessageWhenValidationBeforeGenerateFails(PackageValidationResultType type)
+            [InlineData(PackageValidationResultType.Invalid, false)]
+            [InlineData(PackageValidationResultType.Invalid, true)]
+            public async Task WillShowTheValidationMessageWhenValidationBeforeGenerateFails(PackageValidationResultType type, bool hasRawHtml)
             {
                 var fakeUploadFileService = new Mock<IUploadFileService>();
                 using (var fakeFileStream = new MemoryStream())
                 {
-                    var expectedMessage = "The package is just bad.";
+                    const string expectedMessage = "The package is just bad.";
+                    var messageMock = new Mock<IValidationMessage>();
+                    messageMock
+                        .SetupGet(m => m.PlainTextMessage)
+                        .Returns(expectedMessage);
+                    messageMock
+                        .SetupGet(m => m.HasRawHtmlRepresentation)
+                        .Returns(hasRawHtml);
+                    messageMock
+                        .SetupGet(m => m.RawHtmlMessage)
+                        .Returns(hasRawHtml ? null : expectedMessage);
+                    var expectedResult = new PackageValidationResult(type, messageMock.Object);
 
                     fakeUploadFileService.Setup(x => x.GetUploadFileAsync(TestUtility.FakeUser.Key)).Returns(Task.FromResult<Stream>(fakeFileStream));
                     fakeUploadFileService.Setup(x => x.DeleteUploadFileAsync(TestUtility.FakeUser.Key)).Returns(Task.FromResult(0));
@@ -5539,7 +5640,7 @@ namespace NuGetGallery
                         .Setup(x => x.ValidateBeforeGeneratePackageAsync(
                             It.IsAny<PackageArchiveReader>(),
                             It.IsAny<PackageMetadata>()))
-                        .ReturnsAsync(new PackageValidationResult(type, expectedMessage));
+                        .ReturnsAsync(expectedResult);
                     var fakeNuGetPackage = TestPackage.CreateTestPackageStream(PackageId, PackageVersion);
 
                     var fakeUserService = new Mock<IUserService>();
@@ -5555,7 +5656,7 @@ namespace NuGetGallery
 
                     var result = await controller.VerifyPackage(new VerifyPackageRequest() { Listed = true, Owner = TestUtility.FakeUser.Username });
 
-                    VerifyPackageValidationResultMessage(type, expectedMessage, controller, result);
+                    VerifyPackageValidationResultMessage(type, expectedResult, controller, result);
                     fakePackageUploadService.Verify(
                         x => x.GeneratePackageAsync(
                             It.IsAny<string>(),
@@ -5567,21 +5668,21 @@ namespace NuGetGallery
                 }
             }
 
-            private static void VerifyPackageValidationResultMessage(PackageValidationResultType type, string expectedMessage, PackagesController controller, JsonResult result)
+            private static void VerifyPackageValidationResultMessage(PackageValidationResultType type, PackageValidationResult expectedResult, PackagesController controller, JsonResult result)
             {
                 var jsonResult = Assert.IsType<JsonResult>(result);
                 Assert.Equal((int)HttpStatusCode.BadRequest, controller.Response.StatusCode);
-                var message = (jsonResult.Data as string[])[0];
+                var message = (jsonResult.Data as JsonValidationMessage[])[0];
 
-                if (type == PackageValidationResultType.PackageShouldNotBeSignedButCanManageCertificates)
+                if (!expectedResult.Message.HasRawHtmlRepresentation)
                 {
-                    Assert.Equal(
-                        expectedMessage + " You can manage your certificates on the Account Settings page.",
-                        message);
+                    Assert.Null(message.RawHtmlMessage);
+                    Assert.Equal(expectedResult.Message.PlainTextMessage, message.PlainTextMessage);
                 }
                 else
                 {
-                    Assert.Equal(expectedMessage, message);
+                    Assert.Null(message.PlainTextMessage);
+                    Assert.Equal(expectedResult.Message.RawHtmlMessage, message.RawHtmlMessage);
                 }
             }
 
@@ -5639,8 +5740,8 @@ namespace NuGetGallery
                         var jsonResult = Assert.IsType<JsonResult>(result);
                         if (expectedMessage != null)
                         {
-                            var message = (jsonResult.Data as string[])[0];
-                            Assert.Equal(expectedMessage, message);
+                            var message = (jsonResult.Data as JsonValidationMessage[])[0];
+                            Assert.Equal(expectedMessage, message.PlainTextMessage);
                         }
                     }
                 }
@@ -6336,7 +6437,7 @@ namespace NuGetGallery
                     var result = await controller.VerifyPackage(new VerifyPackageRequest() { Owner = TestUtility.FakeUser.Username });
 
                     Assert.NotNull(result);
-                    Assert.Equal(message, (result.Data as string[])[0]);
+                    Assert.Equal(message, (result.Data as JsonValidationMessage[])[0].PlainTextMessage);
                 }
             }
 
@@ -6373,7 +6474,7 @@ namespace NuGetGallery
                     var result = await controller.VerifyPackage(new VerifyPackageRequest() { Owner = TestUtility.FakeUser.Username });
 
                     Assert.NotNull(result);
-                    Assert.Equal(Strings.VerifyPackage_UnexpectedError, (result.Data as string[])[0]);
+                    Assert.Equal(Strings.VerifyPackage_UnexpectedError, (result.Data as JsonValidationMessage[])[0].PlainTextMessage);
                     telemetryService
                         .Verify(x => x.TrackSymbolPackagePushFailureEvent(PackageId, PackageVersion), Times.Once);
                 }
@@ -6984,6 +7085,256 @@ namespace NuGetGallery
 
                 Assert.NotNull(result);
                 Assert.Equal((int)HttpStatusCode.OK, controller.Response.StatusCode);
+            }
+        }
+
+        public class ThePreviewReadMeMethod : TestContainer
+        {
+            [Fact]
+            public async Task ReturnsProperResponseModelWhenSucceeds()
+            {
+                var readmeService = new Mock<IReadMeService>();
+                var controller = CreateController(GetConfigurationService(),
+                    readMeService: readmeService.Object);
+
+                var request = new ReadMeRequest();
+
+                readmeService
+                    .Setup(rs => rs.HasReadMeSource(request))
+                    .Returns(true);
+
+                const string html = "some HTML";
+
+                readmeService
+                    .Setup(rs => rs.GetReadMeHtmlAsync(request, It.IsAny<Encoding>()))
+                    .ReturnsAsync(html);
+
+                var result = await controller.PreviewReadMe(request);
+
+                var stringArray = Assert.IsType<string[]>(result.Data);
+                Assert.Single(stringArray);
+                Assert.Equal(html, stringArray[0]);
+            }
+
+            [Fact]
+            public async Task ReturnsProperResponseModelWhenNoReadme()
+            {
+                var readmeService = new Mock<IReadMeService>();
+                var controller = CreateController(GetConfigurationService(),
+                    readMeService: readmeService.Object);
+
+                var request = new ReadMeRequest();
+
+                readmeService
+                    .Setup(rs => rs.HasReadMeSource(request))
+                    .Returns(false);
+
+                var result = await controller.PreviewReadMe(request);
+
+                var stringArray = Assert.IsType<string[]>(result.Data);
+                Assert.Single(stringArray);
+                Assert.Equal("There is no Markdown Documentation available to preview.", stringArray[0]);
+            }
+
+            [Fact]
+            public async Task ReturnsProperResponseModelWhenConversionFails()
+            {
+                var readmeService = new Mock<IReadMeService>();
+                var controller = CreateController(GetConfigurationService(),
+                    readMeService: readmeService.Object);
+
+                var request = new ReadMeRequest();
+
+                readmeService
+                    .Setup(rs => rs.HasReadMeSource(request))
+                    .Returns(true);
+
+                const string exceptionMessage = "failure";
+                readmeService
+                    .Setup(rs => rs.GetReadMeHtmlAsync(request, It.IsAny<Encoding>()))
+                    .ThrowsAsync(new Exception(exceptionMessage));
+
+                var result = await controller.PreviewReadMe(request);
+
+                var stringArray = Assert.IsType<string[]>(result.Data);
+                Assert.Single(stringArray);
+                Assert.Contains(exceptionMessage, stringArray[0]);
+            }
+        }
+
+        public class LicenseMethod : TestContainer
+        {
+            private readonly Mock<IPackageService> _packageService;
+            private readonly Mock<IFlatContainerService> _flatContainerService;
+            private readonly Mock<IPackageFileService> _packageFileService;
+            private readonly Mock<ICoreLicenseFileService> _coreLicenseFileService;
+            private string _packageId = "packageId";
+            private string _packageVersion = "1.0.0";
+
+            public LicenseMethod()
+            {
+                _packageService = new Mock<IPackageService>();
+                _flatContainerService = new Mock<IFlatContainerService>();
+                _packageFileService = new Mock<IPackageFileService>();
+                _coreLicenseFileService = new Mock<ICoreLicenseFileService>();
+            }
+
+            [Fact]
+            public async Task GivenInvalidPackageReturns404()
+            {
+                // arrange
+                _packageService.Setup(p => p.FindPackageByIdAndVersionStrict(_packageId, _packageVersion)).Returns<Package>(null);
+                var controller = CreateController(
+                    GetConfigurationService(),
+                    packageService: _packageService);
+
+                // act
+                var result = await controller.License(_packageId, _packageVersion);
+
+                // assert
+                Assert.IsType<HttpNotFoundResult>(result);
+            }
+
+            [Theory]
+            [InlineData("MIT", "https://licenses.nuget.org/MIT")]
+            [InlineData("TestLicenseExpression", "https://licenses.nuget.org/TestLicenseExpression")]
+            public async Task GivenValidPackageWithLicenseExpressionRedirectToLicenseUrl(string licenseExpression, string expectedRedirectUrl)
+            {
+                // arrange
+                var package = new Package
+                {
+                    PackageRegistration = new PackageRegistration { Id = _packageId },
+                    Version = _packageVersion,
+                    LicenseExpression = licenseExpression
+                };
+
+                _packageService.Setup(p => p.FindPackageByIdAndVersionStrict(_packageId, _packageVersion)).Returns(package);
+                var controller = CreateController(
+                    GetConfigurationService(),
+                    packageService: _packageService);
+
+                // act
+                var result = await controller.License(_packageId, _packageVersion);
+
+                // assert
+                ResultAssert.IsRedirectTo(result, expectedRedirectUrl);
+            }
+
+            [Fact]
+            public async Task GivenPackageWithoutLicenseFileReturns404()
+            {
+                // arrange
+                var package = new Package
+                {
+                    PackageRegistration = new PackageRegistration { Id = _packageId },
+                    Version = _packageVersion,
+                };
+                package.EmbeddedLicenseType = EmbeddedLicenseFileType.Absent;
+
+                _packageService.Setup(p => p.FindPackageByIdAndVersionStrict(_packageId, _packageVersion)).Returns(package);
+                var controller = CreateController(
+                    GetConfigurationService(),
+                    packageService: _packageService);
+
+                // act
+                var result = await controller.License(_packageId, _packageVersion);
+
+                // assert
+                Assert.IsType<HttpNotFoundResult>(result);
+            }
+
+            [Theory]
+            [InlineData(EmbeddedLicenseFileType.Markdown)]
+            [InlineData(EmbeddedLicenseFileType.PlainText)]
+            public async Task GivenValidPackageInfoRedirectToLicenseFileUrlWhenUsingFlatContainer(EmbeddedLicenseFileType embeddedLicenseFileType)
+            {
+                // Arrange
+                var package = new Package
+                {
+                    PackageRegistration = new PackageRegistration { Id = _packageId },
+                    Version = _packageVersion,
+                };
+                package.EmbeddedLicenseType = embeddedLicenseFileType;
+                var configurationService = GetConfigurationService();
+                configurationService.Current.AsynchronousPackageValidationEnabled = true;
+
+                _packageService.Setup(p => p.FindPackageByIdAndVersionStrict(_packageId, _packageVersion)).Returns(package);
+                _flatContainerService.Setup(p => p.GetLicenseFileFlatContainerUrlAsync(It.IsAny<string>(), It.IsAny<string>())).ReturnsAsync("theReturnUrl");
+                var controller = CreateController(
+                    configurationService,
+                    packageService: _packageService,
+                    flatContainerService: _flatContainerService);
+
+                // Act
+                var result = await controller.License(_packageId, _packageVersion);
+
+                // Assert
+                ResultAssert.IsRedirectTo(result, "theReturnUrl");
+            }
+
+            [Theory]
+            [InlineData(EmbeddedLicenseFileType.Markdown)]
+            [InlineData(EmbeddedLicenseFileType.PlainText)]
+            public async Task GivenValidPackageInfoButInvalidLicenseFileReturns404(EmbeddedLicenseFileType embeddedLicenseFileType)
+            {
+                // Arrange
+                var package = new Package
+                {
+                    PackageRegistration = new PackageRegistration { Id = null },
+                    Version = _packageVersion,
+                };
+                package.EmbeddedLicenseType = embeddedLicenseFileType;
+                var configurationService = GetConfigurationService();
+                configurationService.Current.AsynchronousPackageValidationEnabled = false;
+
+                _packageService.Setup(p => p.FindPackageByIdAndVersionStrict(_packageId, _packageVersion)).Returns(package);
+                _coreLicenseFileService.Setup(p => p.DownloadLicenseFileAsync(package)).Throws(new ArgumentException());
+                var controller = CreateController(
+                    configurationService,
+                    packageService: _packageService,
+                    coreLicenseFileService: _coreLicenseFileService);
+
+                // Act
+                var result = await controller.License(_packageId, _packageVersion);
+
+                // Assert
+                Assert.IsType<HttpNotFoundResult>(result);
+            }
+
+            [Theory]
+            [InlineData(EmbeddedLicenseFileType.Markdown)]
+            [InlineData(EmbeddedLicenseFileType.PlainText)]
+            public async Task GivenValidPackageInfoAndLicenseFileReturnsLicenseContentWhenUsingFiles(EmbeddedLicenseFileType embeddedLicenseFileType)
+            {
+                // Arrange
+                var package = new Package
+                {
+                    PackageRegistration = new PackageRegistration { Id = _packageId },
+                    Version = _packageVersion,
+                };
+                package.EmbeddedLicenseType = embeddedLicenseFileType;
+                var configurationService = GetConfigurationService();
+                configurationService.Current.AsynchronousPackageValidationEnabled = false;
+
+                _packageService.Setup(p => p.FindPackageByIdAndVersionStrict(_packageId, _packageVersion)).Returns(package);
+                var controller = CreateController(
+                    configurationService,
+                    packageService: _packageService,
+                    coreLicenseFileService: _coreLicenseFileService);
+
+                var fakeFileStream = new MemoryStream();
+                _coreLicenseFileService
+                    .Setup(p => p.DownloadLicenseFileAsync(package))
+                    .Returns(Task.FromResult<Stream>(fakeFileStream));
+
+                // Act
+                var licenseFile = await controller.License(_packageId, _packageVersion);
+
+                // Assert
+                Assert.IsType<FileStreamResult>(licenseFile);
+                _coreLicenseFileService
+                    .Verify(p => p.DownloadLicenseFileAsync(package),
+                        Times.Once);
             }
         }
     }

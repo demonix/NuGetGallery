@@ -4,6 +4,8 @@
 using System;
 using System.Globalization;
 using System.Net.Mail;
+using NuGet.Services.Entities;
+using NuGet.Services.Messaging.Email;
 
 namespace NuGetGallery.Infrastructure.Mail.Messages
 {
@@ -53,9 +55,10 @@ namespace NuGetGallery.Infrastructure.Mail.Messages
 
         public override IEmailRecipients GetRecipients()
         {
-            return new EmailRecipientsWithPermission(
-                ToUser,
-                ActionsRequiringPermissions.HandlePackageOwnershipRequest,
+            return new EmailRecipients(
+                to: GalleryEmailRecipientsUtility.GetAddressesWithPermission(
+                    ToUser,
+                    ActionsRequiringPermissions.HandlePackageOwnershipRequest),
                 replyTo: new[] { FromUser.ToMailAddress() });
         }
 

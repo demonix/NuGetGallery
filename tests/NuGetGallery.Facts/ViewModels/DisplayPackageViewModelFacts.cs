@@ -4,6 +4,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using NuGet.Services.Entities;
 using NuGet.Versioning;
 using NuGetGallery.Framework;
 using Xunit;
@@ -14,7 +15,8 @@ namespace NuGetGallery.ViewModels
     public class DisplayPackageViewModelFacts
     {
         private Random gen = new Random();
-        DateTime RandomDay()
+
+        private DateTime RandomDay()
         {
             DateTime start = new DateTime(1995, 1, 1);
             int range = (DateTime.Today - start).Days;
@@ -45,7 +47,7 @@ namespace NuGetGallery.ViewModels
         {
             var package = new Package
             {
-                Version= "1.0.0",
+                Version = "1.0.0",
                 RepositoryUrl = repoUrl,
                 RepositoryType = repoType,
             };
@@ -76,6 +78,8 @@ namespace NuGetGallery.ViewModels
         [InlineData("http://msdn.microsoft.com/en-us/library/vstudio/hh191443.aspx", "https://msdn.microsoft.com/en-us/library/vstudio/hh191443.aspx")]
         [InlineData("http://microsoft.com/iconurl/9594202", "https://microsoft.com/iconurl/9594202")]
         [InlineData("http://microsoft.com:80/", "https://microsoft.com/")]
+        [InlineData("http://githubpages.github.io/my.page", "https://githubpages.github.io/my.page")]
+        [InlineData("http://githubpages.github.com", "https://githubpages.github.com/")]
         public void ItInitializesProjectUrl(string projectUrl, string expected)
         {
             var package = new Package
@@ -97,6 +101,8 @@ namespace NuGetGallery.ViewModels
         [InlineData("http://aspnetwebstack.codeplex.com/license", "https://aspnetwebstack.codeplex.com/license")]
         [InlineData("http://go.microsoft.com/?linkid=9809688", "https://go.microsoft.com/?linkid=9809688")]
         [InlineData("http://github.com/url", "https://github.com/url")]
+        [InlineData("http://githubpages.github.io/my.page/license.html", "https://githubpages.github.io/my.page/license.html")]
+        [InlineData("http://githubpages.github.com", "https://githubpages.github.com/")]
         public void ItInitializesLicenseUrl(string licenseUrl, string expected)
         {
             var package = new Package
@@ -159,6 +165,55 @@ namespace NuGetGallery.ViewModels
             Assert.Equal("1.0.2-beta", packageVersions[2].Version);
             Assert.Equal("1.0.2", packageVersions[1].Version);
             Assert.Equal("1.0.10", packageVersions[0].Version);
+        }
+
+        [Fact]
+        public void TheCtorDoesNotPopulateLatestSymbolsPackageForHistory()
+        {
+            var package = new Package
+            {
+                Version = "1.0.0",
+                Dependencies = Enumerable.Empty<PackageDependency>().ToList(),
+                PackageRegistration = new PackageRegistration
+                {
+                    Owners = Enumerable.Empty<User>().ToList(),
+                }
+            };
+
+            package.SymbolPackages.Add(new SymbolPackage()
+            {
+                Package = package,
+                StatusKey = PackageStatus.Available
+            });
+
+            package.PackageRegistration.Packages = new[]
+                {
+                    new Package { Version = "1.0.0-alpha2", PackageRegistration = package.PackageRegistration },
+                    new Package { Version = "1.0.0", PackageRegistration = package.PackageRegistration },
+                    new Package { Version = "1.0.0-alpha", PackageRegistration = package.PackageRegistration },
+                    new Package { Version = "1.0.0-beta", PackageRegistration = package.PackageRegistration },
+                    new Package { Version = "1.0.2-beta", PackageRegistration = package.PackageRegistration },
+                    new Package { Version = "1.0.2", PackageRegistration = package.PackageRegistration },
+                    new Package { Version = "1.0.10", PackageRegistration = package.PackageRegistration }
+                };
+
+            foreach (var packageVersion in package.PackageRegistration.Packages)
+            {
+                packageVersion.SymbolPackages.Add(new SymbolPackage()
+                {
+                    Package = packageVersion,
+                    StatusKey = PackageStatus.Available
+                });
+            }
+
+            var viewModel = new DisplayPackageViewModel(package, null, package.PackageRegistration.Packages.OrderByDescending(p => new NuGetVersion(p.Version)));
+
+            // Descending
+            Assert.NotNull(viewModel.LatestSymbolsPackage);
+            foreach (var version in viewModel.PackageVersions)
+            {
+                Assert.Null(version.LatestSymbolsPackage);
+            }
         }
 
         [Fact]
@@ -309,8 +364,8 @@ namespace NuGetGallery.ViewModels
         [InlineData("1.0.0", "1.0.0-alpha.1", false)]
         [InlineData("1.0.0-alpha", "1.0.0-alpha.1", true)]
         public void HasNewerPrereleaseReturnsTrueWhenNewerPrereleaseAvailable(
-            string currentVersion, 
-            string otherVersion, 
+            string currentVersion,
+            string otherVersion,
             bool expectedNewerPrereleaseAvailable)
         {
             // Arrange
@@ -346,7 +401,7 @@ namespace NuGetGallery.ViewModels
             // Assert
             Assert.Equal(expectedNewerPrereleaseAvailable, hasNewerPrerelease);
         }
-        
+
         [Theory]
         [InlineData("1.0.0", "1.0.1", true)]
         [InlineData("1.0.1-alpha+metadata", "1.0.1", true)]

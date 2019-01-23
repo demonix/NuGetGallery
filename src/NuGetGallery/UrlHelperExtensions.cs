@@ -7,6 +7,7 @@ using System.Globalization;
 using System.Web;
 using System.Web.Mvc;
 using System.Web.Routing;
+using NuGet.Services.Entities;
 using NuGetGallery.Areas.Admin;
 using NuGetGallery.Areas.Admin.Controllers;
 using NuGetGallery.Configuration;
@@ -1257,6 +1258,20 @@ namespace NuGetGallery
             return GetActionLink(
                 url,
                 "ContactOwners",
+                "Packages",
+                relativeUrl,
+                routeValues: new RouteValueDictionary
+                {
+                    { "id", id },
+                    { "version", version }
+                });
+        }
+
+        public static string License(this UrlHelper url, string id, string version, bool relativeUrl = true)
+        {
+            return GetActionLink(
+                url,
+                "License",
                 "Packages",
                 relativeUrl,
                 routeValues: new RouteValueDictionary

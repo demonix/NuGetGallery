@@ -5,6 +5,7 @@ using System;
 using System.Collections.Generic;
 using System.Data.Entity;
 using System.Threading.Tasks;
+using NuGet.Services.Entities;
 using Xunit;
 
 namespace NuGetGallery
@@ -13,30 +14,6 @@ namespace NuGetGallery
     {
         private readonly Dictionary<Type, object> dbSets = new Dictionary<Type,object>();
         private bool _areChangesSaved;
-
-        public IDbSet<CuratedFeed> CuratedFeeds
-        {
-            get
-            {
-                return Set<CuratedFeed>();
-            }
-            set
-            {
-                throw new NotSupportedException();
-            }
-        }
-
-        public IDbSet<CuratedPackage> CuratedPackages
-        {
-            get
-            {
-                return Set<CuratedPackage>();
-            }
-            set
-            {
-                throw new NotSupportedException();
-            }
-        }
 
         public IDbSet<PackageRegistration> PackageRegistrations
         {

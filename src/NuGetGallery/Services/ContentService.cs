@@ -61,9 +61,9 @@ namespace NuGetGallery
             
             return GetContentItemCore(
                 name, new [] { 
-                    Constants.HtmlFileExtension,
-                    Constants.MarkdownFileExtension,
-                    Constants.JsonFileExtension }, 
+                    GalleryConstants.HtmlFileExtension,
+                    GalleryConstants.MarkdownFileExtension,
+                    GalleryConstants.JsonFileExtension }, 
                 expiresIn);
         }
 
@@ -124,7 +124,7 @@ namespace NuGetGallery
             using (Trace.Activity("Downloading Content Item: " + fileName))
             {
                 IFileReference reference = await FileStorage.GetFileReferenceAsync(
-                    CoreConstants.ContentFolderName,
+                    CoreConstants.Folders.ContentFolderName,
                     fileName,
                     ifNoneMatch: cachedItem?.ContentId);
 

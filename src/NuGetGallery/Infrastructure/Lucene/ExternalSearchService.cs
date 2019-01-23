@@ -9,6 +9,7 @@ using System.Net;
 using System.Threading.Tasks;
 using System.Web;
 using Newtonsoft.Json.Linq;
+using NuGet.Services.Entities;
 using NuGet.Services.Search.Client;
 using NuGet.Services.Search.Client.Correlation;
 using NuGetGallery.Configuration;
@@ -132,7 +133,6 @@ namespace NuGetGallery.Infrastructure.Lucene
                 filter.SearchTerm,
                 projectTypeFilter: null,
                 includePrerelease: filter.IncludePrerelease,
-                curatedFeed: filter.CuratedFeed?.Name,
                 sortBy: filter.SortOrder,
                 skip: filter.Skip,
                 take: filter.Take,
@@ -184,7 +184,6 @@ namespace NuGetGallery.Infrastructure.Lucene
                     {"Hits", results == null ? -1 : results.Hits},
                     {"StatusCode", (int)result.StatusCode},
                     {"SortOrder", filter.SortOrder.ToString()},
-                    {"CuratedFeed", filter.CuratedFeed?.Name},
                     {"Url", TryGetUrl()}
                 });
 

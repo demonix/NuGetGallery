@@ -1,4 +1,4 @@
-﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Copyright (c) .NET Foundation. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System;
@@ -12,7 +12,7 @@ namespace NuGetGallery.Configuration
     {
         private string _ExternalBrandingMessage;
 
-        [DefaultValue(Constants.DevelopmentEnvironment)]
+        [DefaultValue(GalleryConstants.DevelopmentEnvironment)]
         public string Environment { get; set; }
 
         [DefaultValue("")]
@@ -58,6 +58,9 @@ namespace NuGetGallery.Configuration
 
         [DisplayName("AzureStorage.Uploads.ConnectionString")]
         public string AzureStorage_Uploads_ConnectionString { get; set; }
+
+        [DisplayName("AzureStorage.Revalidation.ConnectionString")]
+        public string AzureStorage_Revalidation_ConnectionString { get; set; }
 
         /// <summary>
         /// Gets a setting if Read Access Geo Redundant is enabled in azure storage
@@ -358,13 +361,17 @@ namespace NuGetGallery.Configuration
 
         [DefaultValue(null)]
         [TypeConverter(typeof(StringArrayConverter))]
-        public string[] DisabledCuratedFeeds { get; set; }
-
-        [DefaultValue(null)]
-        [TypeConverter(typeof(StringArrayConverter))]
         public string[] RedirectedCuratedFeeds { get; set; }
+
+        public bool AsynchronousEmailServiceEnabled { get; set; }
 
         [DefaultValue(false)]
         public bool RejectPackagesWithLicense { get; set; }
+
+        [DefaultValue(false)]
+        public bool BlockLegacyLicenseUrl { get; set; }
+
+        [DefaultValue(true)]
+        public bool AllowLicenselessPackages { get; set; }
     }
 }

@@ -20,12 +20,15 @@ namespace NuGetGallery
         DateTime LastModifiedUtc { get; }
         string ETag { get; }
 
+        Task<Stream> OpenReadAsync(AccessCondition accessCondition);
+
         Task DeleteIfExistsAsync();
         Task DownloadToStreamAsync(Stream target);
         Task DownloadToStreamAsync(Stream target, AccessCondition accessCondition);
 
         Task<bool> ExistsAsync();
         Task SetPropertiesAsync();
+        Task SetPropertiesAsync(AccessCondition accessCondition);
         Task SetMetadataAsync(AccessCondition accessCondition);
         Task UploadFromStreamAsync(Stream source, bool overwrite);
         Task UploadFromStreamAsync(Stream source, AccessCondition accessCondition);

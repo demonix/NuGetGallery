@@ -1,8 +1,8 @@
-﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Copyright (c) .NET Foundation. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System;
-using NuGetGallery.Infrastructure.Mail;
+using NuGet.Services.Messaging.Email;
 
 namespace NuGetGallery.Configuration
 {
@@ -74,6 +74,11 @@ namespace NuGetGallery.Configuration
         /// The Azure Storage connection string used for package uploads, before publishing.
         /// </summary>
         string AzureStorage_Uploads_ConnectionString { get; set; }
+
+        /// <summary>
+        /// The Azure storage connection string used for RevalidateCertificate job admin panel.
+        /// </summary>
+        string AzureStorage_Revalidation_ConnectionString { get; set; }
 
         /// <summary>
         /// Gets a setting if Read Access Geo Redundant is enabled in azure storage
@@ -360,19 +365,29 @@ namespace NuGetGallery.Configuration
         bool BlockSearchEngineIndexing { get; set; }
 
         /// <summary>
-        /// The name of zero or more curated feeds that are disabled. If a curated feed is disabled, it appears as if
-        /// it doesn't exist.
-        /// </summary>
-        string[] DisabledCuratedFeeds { get; set; }
-
-        /// <summary>
         /// The name of zero or more curated feeds that are redirected to the main feed.
         /// </summary>
         string[] RedirectedCuratedFeeds { get; set; }
 
         /// <summary>
+        /// Gets or sets a flag indicating whether asynchronous email service is enabled.
+        /// </summary>
+        bool AsynchronousEmailServiceEnabled { get; set; }
+
+        /// <summary>
         /// Flag that indicates whether packages with `license` node in them should be rejected.
         /// </summary>
         bool RejectPackagesWithLicense { get; set; }
+
+        /// <summary>
+        /// Indicates whether packages that specify the license the "old" way (with a "licenseUrl" node only) should be rejected.
+        /// </summary>
+        bool BlockLegacyLicenseUrl { get; set; }
+
+        /// <summary>
+        /// Indicates whether packages that don't specify any license information (no license URL, no license expression,
+        /// no embedded license) are allowed into Gallery.
+        /// </summary>
+        bool AllowLicenselessPackages { get; set; }
     }
 }

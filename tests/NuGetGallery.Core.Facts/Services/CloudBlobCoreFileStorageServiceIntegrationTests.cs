@@ -4,6 +4,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.IO;
+using System.Net;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -59,10 +60,133 @@ namespace NuGetGallery
         }
 
         [BlobStorageFact]
+        public async Task OpenReadAsyncReturnsReadableStreamWhenBlobExistsAndPopulatesProperties()
+        {
+            // Arrange
+            var folderName = CoreConstants.Folders.ValidationFolderName;
+            var fileName = _prefixA;
+            var expectedContent = "Hello, world.";
+
+            await _targetA.SaveFileAsync(
+                folderName,
+                fileName,
+                new MemoryStream(Encoding.ASCII.GetBytes(expectedContent)),
+                overwrite: false);
+
+            var container = _clientA.GetContainerReference(folderName);
+            var file = container.GetBlobReference(fileName);
+
+            // Act
+            using (var stream = await file.OpenReadAsync(accessCondition: null))
+            using (var streamReader = new StreamReader(stream))
+            {
+                var actualContent = await streamReader.ReadToEndAsync();
+
+                // Assert
+                Assert.Equal(expectedContent, actualContent);
+                Assert.Equal(expectedContent.Length, file.Properties.Length);
+                Assert.NotNull(file.ETag);
+            }
+        }
+
+        [BlobStorageFact]
+        public async Task OpenReadAsyncThrowsNotFoundWhenBlobDoesNotExist()
+        {
+            // Arrange
+            var folderName = CoreConstants.Folders.ValidationFolderName;
+            var fileName = _prefixA;
+            var exists = await _targetA.FileExistsAsync(folderName, fileName);
+            var container = _clientA.GetContainerReference(folderName);
+            var file = container.GetBlobReference(fileName);
+
+            // Act & Assert
+            Assert.False(exists);
+            var ex = await Assert.ThrowsAsync<StorageException>(
+                () => file.OpenReadAsync(accessCondition: null));
+            Assert.Equal(HttpStatusCode.NotFound, (HttpStatusCode)ex.RequestInformation.HttpStatusCode);
+        }
+
+        [BlobStorageFact]
+        public async Task OpenReadAsyncThrowsPreconditionFailedWhenIfMatchFails()
+        {
+            // Arrange
+            var folderName = CoreConstants.Folders.ValidationFolderName;
+            var fileName = _prefixA;
+
+            await _targetA.SaveFileAsync(
+                folderName,
+                fileName,
+                new MemoryStream(Encoding.ASCII.GetBytes("Hello, world.")),
+                overwrite: false);
+
+            var container = _clientA.GetContainerReference(folderName);
+            var file = container.GetBlobReference(fileName);
+            await file.FetchAttributesAsync();
+
+            // Act & Assert
+            var ex = await Assert.ThrowsAsync<StorageException>(
+                () => file.OpenReadAsync(accessCondition: AccessCondition.GenerateIfMatchCondition("WON'T MATCH")));
+            Assert.Equal(HttpStatusCode.PreconditionFailed, (HttpStatusCode)ex.RequestInformation.HttpStatusCode);
+        }
+
+        [BlobStorageFact]
+        public async Task OpenReadAsyncThrowsNotModifiedWhenIfNoneMatchFails()
+        {
+            // Arrange
+            var folderName = CoreConstants.Folders.ValidationFolderName;
+            var fileName = _prefixA;
+
+            await _targetA.SaveFileAsync(
+                folderName,
+                fileName,
+                new MemoryStream(Encoding.ASCII.GetBytes("Hello, world.")),
+                overwrite: false);
+
+            var container = _clientA.GetContainerReference(folderName);
+            var file = container.GetBlobReference(fileName);
+            await file.FetchAttributesAsync();
+
+            // Act & Assert
+            var ex = await Assert.ThrowsAsync<StorageException>(
+                () => file.OpenReadAsync(accessCondition: AccessCondition.GenerateIfNoneMatchCondition(file.ETag)));
+            Assert.Equal(HttpStatusCode.NotModified, (HttpStatusCode)ex.RequestInformation.HttpStatusCode);
+        }
+
+        [BlobStorageFact]
+        public async Task OpenReadAsyncReturnsContentWhenIfNoneMatchSucceeds()
+        {
+            // Arrange
+            var folderName = CoreConstants.Folders.ValidationFolderName;
+            var fileName = _prefixA;
+            var expectedContent = "Hello, world.";
+
+            await _targetA.SaveFileAsync(
+                folderName,
+                fileName,
+                new MemoryStream(Encoding.ASCII.GetBytes(expectedContent)),
+                overwrite: false);
+
+            var container = _clientA.GetContainerReference(folderName);
+            var file = container.GetBlobReference(fileName);
+
+            // Act
+            using (var stream = await file.OpenReadAsync(accessCondition: AccessCondition.GenerateIfNoneMatchCondition("WON'T MATCH")))
+            using (var streamReader = new StreamReader(stream))
+            {
+                var actualContent = await streamReader.ReadToEndAsync();
+
+                // Assert
+                Assert.Equal(expectedContent, actualContent);
+                Assert.Equal(expectedContent.Length, file.Properties.Length);
+                Assert.NotNull(file.ETag);
+            }
+        }
+
+        [BlobStorageFact]
         public async Task ReturnsCurrentETagForIfMatch()
         {
             // Arrange
-            var folderName = CoreConstants.ValidationFolderName;
+            var folderName = CoreConstants.Folders.ValidationFolderName;
             var fileName = _prefixA;
             await _targetA.SaveFileAsync(folderName, fileName, new MemoryStream(new byte[0]));
             var initialReference = await _targetA.GetFileReferenceAsync(folderName, fileName);
@@ -81,7 +205,7 @@ namespace NuGetGallery
         public async Task ReturnsNullForMissingBlob()
         {
             // Arrange
-            var folderName = CoreConstants.ValidationFolderName;
+            var folderName = CoreConstants.Folders.ValidationFolderName;
             var fileName = _prefixA;
 
             // Act
@@ -95,7 +219,7 @@ namespace NuGetGallery
         public async Task ReturnsTheETagMatchingTheContent()
         {
             // Arrange
-            var folderName = CoreConstants.ValidationFolderName;
+            var folderName = CoreConstants.Folders.ValidationFolderName;
             var fileName = _prefixA;
             var contentToETag = new ConcurrentDictionary<string, string>();
             var iterations = 20;
@@ -154,7 +278,7 @@ namespace NuGetGallery
         public async Task CanReadAndDeleteBlobUsingPrivilegedFileUri()
         {
             // Arrange
-            var folderName = CoreConstants.ValidationFolderName;
+            var folderName = CoreConstants.Folders.ValidationFolderName;
             var fileName = _prefixA;
             var expectedContent = "Hello, world.";
 
@@ -206,11 +330,11 @@ namespace NuGetGallery
         public async Task DoesNotCopyWhenSourceAndDestinationHaveSameHash()
         {
             // Arrange
-            var srcFolderName = CoreConstants.ValidationFolderName;
+            var srcFolderName = CoreConstants.Folders.ValidationFolderName;
             var srcFileName = $"{_prefixA}/src";
             var srcContent = "Hello, world.";
 
-            var destFolderName = CoreConstants.PackagesFolderName;
+            var destFolderName = CoreConstants.Folders.PackagesFolderName;
             var destFileName = $"{_prefixB}/dest";
 
             await _targetA.SaveFileAsync(
@@ -252,11 +376,11 @@ namespace NuGetGallery
         public async Task CopiesWhenDestinationHasNotHashButContentsAreTheSame()
         {
             // Arrange
-            var srcFolderName = CoreConstants.ValidationFolderName;
+            var srcFolderName = CoreConstants.Folders.ValidationFolderName;
             var srcFileName = $"{_prefixA}/src";
             var srcContent = "Hello, world.";
 
-            var destFolderName = CoreConstants.PackagesFolderName;
+            var destFolderName = CoreConstants.Folders.PackagesFolderName;
             var destFileName = $"{_prefixB}/dest";
 
             await _targetA.SaveFileAsync(
@@ -317,11 +441,11 @@ namespace NuGetGallery
             CloudBlobCoreFileStorageService destService)
         {
             // Arrange
-            var srcFolderName = CoreConstants.ValidationFolderName;
+            var srcFolderName = CoreConstants.Folders.ValidationFolderName;
             var srcFileName = $"{srcPrefix}/src";
             var srcContent = "Hello, world.";
 
-            var destFolderName = CoreConstants.PackagesFolderName;
+            var destFolderName = CoreConstants.Folders.PackagesFolderName;
             var destFileName = $"{destPrefix}/dest";
 
             await srcService.SaveFileAsync(

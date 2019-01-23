@@ -5,6 +5,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Web.Helpers;
+using NuGet.Services.Entities;
 using NuGetGallery.Services.Authentication;
 
 namespace NuGetGallery.Infrastructure.Authentication
@@ -15,7 +16,7 @@ namespace NuGetGallery.Infrastructure.Authentication
             { CredentialTypes.Ldap.User, (password, cred) => LdapValidator.ValidateUser(username: cred.Value, password: password) },
             { CredentialTypes.Password.V3, (password, cred) => V3Hasher.VerifyHash(hashedData: cred.Value, providedInput: password) },
             { CredentialTypes.Password.Pbkdf2, (password, cred) => Crypto.VerifyHashedPassword(hashedPassword: cred.Value, password: password) },
-            { CredentialTypes.Password.Sha1, (password, cred) => LegacyHasher.VerifyHash(cred.Value, password, Constants.Sha1HashAlgorithmId) }
+            { CredentialTypes.Password.Sha1, (password, cred) => LegacyHasher.VerifyHash(cred.Value, password, GalleryConstants.Sha1HashAlgorithmId) }
         };
 
         public bool ValidatePasswordCredential(Credential credential, string providedPassword)

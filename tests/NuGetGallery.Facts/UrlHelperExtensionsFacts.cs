@@ -1,10 +1,11 @@
 ﻿// Copyright (c) .NET Foundation. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
-using NuGetGallery.Framework;
 using System;
 using System.Collections.Generic;
 using System.Web.Routing;
+using NuGet.Services.Entities;
+using NuGetGallery.Framework;
 using Xunit;
 
 namespace NuGetGallery
@@ -65,6 +66,30 @@ namespace NuGetGallery
 
                 // Act
                 var result = urlHelper.Package("id", "1.0.0", relativeUrl);
+
+                // Assert
+                Assert.Equal(expectedUrl, result);
+            }
+        }
+
+        public class TheLicenseMethod
+            : TestContainer
+        {
+            [Theory]
+            [InlineData("https://nuget.org", "TestPackageId", "1.0.0", "/packages/TestPackageId/1.0.0/License", true)]
+            [InlineData("https://nuget.org", "TestPackageId", "1.0.0", "https://nuget.org/packages/TestPackageId/1.0.0/License", false)]
+            [InlineData("https://localhost:66", "AnotherTestPackageId", "3.0.0", "/packages/AnotherTestPackageId/3.0.0/License", true)]
+            [InlineData("https://localhost:66", "AnotherTestPackageId", "3.0.0", "https://localhost:66/packages/AnotherTestPackageId/3.0.0/License", false)]
+            public void ReturnsCorrectLicenseLink(string siteRoot, string packageId, string packageVersion, string expectedUrl, bool relativeUrl)
+            {
+                // Arrange
+                var configurationService = GetConfigurationService();
+                configurationService.Current.SiteRoot = siteRoot;
+
+                var urlHelper = TestUtility.MockUrlHelper(siteRoot);
+
+                // Act
+                var result = urlHelper.License(packageId, packageVersion, relativeUrl);
 
                 // Assert
                 Assert.Equal(expectedUrl, result);
@@ -210,8 +235,8 @@ namespace NuGetGallery
             [InlineData("https://localhost/Account/SignIn?returnUrl=%2F", "https", "unittest.nuget.org", "https://unittest.nuget.org/Account/SignIn?returnUrl=%2F")]
             [InlineData("https://localhost/Account/SignInNuGetAccount?returnUrl=%2F", "https", "unittest.nuget.org", "https://unittest.nuget.org/Account/SignInNuGetAccount?returnUrl=%2F")]
             public void UsesConfiguredSiteRootInAbsoluteUri(
-                string returnUrl, 
-                string protocol, 
+                string returnUrl,
+                string protocol,
                 string hostName,
                 string expectedReturnUrl)
             {

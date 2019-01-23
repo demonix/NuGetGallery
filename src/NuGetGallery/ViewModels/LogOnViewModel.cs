@@ -76,14 +76,13 @@ namespace NuGetGallery
         [Required]
         [StringLength(255)]
         [Display(Name = "Email")]
-        //[RegularExpression(Constants.EmailValidationRegex, ErrorMessage = Constants.EmailValidationErrorMessage)]
-        [EmailValidation]
-        [Subtext("We use <a href=\"http://www.gravatar.com\" target=\"_blank\">Gravatar</a> to get your profile picture", AllowHtml = true)]
+        //[RegularExpression(GalleryConstants.EmailValidationRegex, ErrorMessage = GalleryConstants.EmailValidationErrorMessage)]
+        [EmailValidation]        [Subtext("We use <a href=\"http://www.gravatar.com\" target=\"_blank\">Gravatar</a> to get your profile picture", AllowHtml = true)]
         public string EmailAddress { get; set; }
 
         [Required]
         [StringLength(64)]
-        [RegularExpression(Constants.UsernameValidationRegex, ErrorMessage = Constants.UsernameValidationErrorMessage)]
+        [RegularExpression(GalleryConstants.UsernameValidationRegex, ErrorMessage = GalleryConstants.UsernameValidationErrorMessage)]
         public string Username { get; set; }
 
         [Required]

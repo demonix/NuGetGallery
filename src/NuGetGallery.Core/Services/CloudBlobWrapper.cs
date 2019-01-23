@@ -29,6 +29,14 @@ namespace NuGetGallery
             _blob = blob;
         }
 
+        public async Task<Stream> OpenReadAsync(AccessCondition accessCondition)
+        {
+            return await _blob.OpenReadAsync(
+                accessCondition: accessCondition,
+                options: null,
+                operationContext: null);
+        }
+
         public async Task DeleteIfExistsAsync()
         {
             await _blob.DeleteIfExistsAsync(
@@ -64,6 +72,11 @@ namespace NuGetGallery
         public async Task SetPropertiesAsync()
         {
             await _blob.SetPropertiesAsync();
+        }
+
+        public async Task SetPropertiesAsync(AccessCondition accessCondition)
+        {
+            await _blob.SetPropertiesAsync(accessCondition, options: null, operationContext: null);
         }
 
         public async Task SetMetadataAsync(AccessCondition accessCondition)
