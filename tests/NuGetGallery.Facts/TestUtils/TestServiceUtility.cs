@@ -41,6 +41,7 @@ namespace NuGetGallery.TestUtils
 
             // Set ConfirmEmailAddress to a default of true
             MockConfig.Setup(c => c.ConfirmEmailAddresses).Returns(true);
+            MockConfig.Setup(c => c.UserEmailRegex).Returns(".+@.+");
 
             MockDatabase = new Mock<IDatabase>();
             MockEntitiesContext.Setup(c => c.GetDatabase()).Returns(MockDatabase.Object);
