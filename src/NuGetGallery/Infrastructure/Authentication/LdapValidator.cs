@@ -30,7 +30,7 @@ namespace NuGetGallery.Infrastructure.Authentication
         {
             try
             {
-                var servicePath = "LDAP://" + BaseConfig.Host + ":" + BaseConfig.Port + "/" + BaseConfig.UserBase;
+                var servicePath = BaseConfig.Protocol + "://" + BaseConfig.Host + ":" + BaseConfig.Port + "/" + BaseConfig.UserBase;
                 DirectoryEntry ldapConnection;
                 if (string.IsNullOrEmpty(BaseConfig.ServiceAccountUserName) || string.IsNullOrEmpty(BaseConfig.ServiceAccountPassword))
                     ldapConnection = new DirectoryEntry(servicePath);

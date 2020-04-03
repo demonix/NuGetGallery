@@ -5,6 +5,7 @@ namespace NuGetGallery.Authentication.Providers.LdapUser
 {
     public class LdapUserAuthenticatorConfiguration : AuthenticatorConfiguration
     {
+        public string Protocol{ get; set; }
         public string Host { get; set; }
         public string Port { get; set; }
         public string ServiceAccountUserName { get; set; }
